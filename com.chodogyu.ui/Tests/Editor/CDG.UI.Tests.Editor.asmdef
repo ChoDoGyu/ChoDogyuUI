@@ -1,0 +1,25 @@
+{
+  "name": "CDG.UI.Tests.Editor",
+  "rootNamespace": "CDG.UI.Tests.Editor",
+  "references": [
+    "CDG.UI",
+    "CDG.UI.Editor",
+    "CDG.Core"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_INCLUDE_TESTS"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}

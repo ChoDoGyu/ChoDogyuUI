@@ -1,0 +1,17 @@
+{
+  "name": "com.chodogyu.ui",
+  "version": "0.1.0",
+  "displayName": "ChoDogyu UI Framework & Editor Tool",
+  "description": "Unity 프로젝트에서 Screen, Popup, Overlay의 UI 흐름을 일관되게 관리하고 UI 제작 및 검증을 지원하는 범용 UI Framework & Editor Tool입니다.",
+  "unity": "6000.3",
+  "keywords": [
+    "ui",
+    "framework",
+    "navigation",
+    "popup",
+    "editor"
+  ],
+  "author": {
+    "name": "ChoDogyu"
+  }
+}

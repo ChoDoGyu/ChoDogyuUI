@@ -1,0 +1,16 @@
+{
+  "name": "CDG.UI",
+  "rootNamespace": "CDG.UI",
+  "references": [
+    "CDG.Core"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

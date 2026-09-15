@@ -1,0 +1,19 @@
+{
+  "name": "CDG.UI.Editor",
+  "rootNamespace": "CDG.UI.Editor",
+  "references": [
+    "CDG.UI",
+    "CDG.Core"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
