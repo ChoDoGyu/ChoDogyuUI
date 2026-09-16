@@ -24,5 +24,10 @@ namespace CDG.UI
         /// 기본값은 false입니다.
         /// </summary>
         public bool BlocksInput => blocksInput;
+
+        internal void SetOverlayLayer(UIOverlayLayer overlayLayer)
+        {
+            this.overlayLayer = overlayLayer;
+        }
     }
 }

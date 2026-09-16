@@ -30,6 +30,7 @@ namespace CDG.UI
         private readonly Dictionary<UIId, UIView> instances = new Dictionary<UIId, UIView>();
         private readonly Stack<UIId> screenHistory = new Stack<UIId>();
         private readonly Stack<UIId> popupStack = new Stack<UIId>();
+        private readonly List<UIId> openOverlayOrder = new List<UIId>();
 
         private UIScreen currentScreen;
 
@@ -174,13 +175,48 @@ namespace CDG.UI
         }
 
         /// <summary>
+        /// 지정한 Overlay를 엽니다.
+        /// Overlay 설정에 따라 Normal 또는 Topmost Layer에 배치되며, 열린 순서를 내부적으로 기록합니다.
+        /// </summary>
+        /// <param name="id">열 Overlay의 UI ID입니다.</param>
+        /// <returns>열린 Overlay 또는 실패 정보를 포함하는 결과입니다.</returns>
+        public Result<UIOverlay> OpenOverlay(UIId id)
+        {
+            CleanupOpenOverlayOrder();
+
+            Result<UIOverlay> targetResult = PrepareOverlayForOpen(id);
+
+            if (targetResult.IsFailure)
+            {
+                return Result<UIOverlay>.Failure(targetResult.Error);
+            }
+
+            Result<UIOverlay> openResult = OpenView<UIOverlay>(id);
+
+            if (openResult.IsFailure)
+            {
+                return Result<UIOverlay>.Failure(openResult.Error);
+            }
+
+            UIOverlay overlay = openResult.Value;
+
+            overlay.transform.SetAsLastSibling();
+            openOverlayOrder.Add(overlay.Id);
+
+            return Result<UIOverlay>.Success(overlay);
+        }
+
+        /// <summary>
         /// 지정한 UI의 Runtime Instance를 닫습니다.
-        /// Popup을 닫으면 Popup Stack에서도 제거되며, 현재 Screen을 직접 닫는 경우 History를 자동 복원하지 않습니다.
+        /// Popup과 Overlay는 각각의 Runtime 관리 목록에서도 제거되며,
+        /// 현재 Screen을 직접 닫는 경우 History를 자동 복원하지 않습니다.
         /// </summary>
         /// <param name="id">닫을 UI의 ID입니다.</param>
         /// <returns>닫기 성공 또는 실패 정보를 포함하는 결과입니다.</returns>
         public Result Close(UIId id)
         {
+            CleanupOpenOverlayOrder();
+
             if (id.IsEmpty)
             {
                 return Result.Failure(new ResultError(
@@ -219,6 +255,11 @@ namespace CDG.UI
             if (instance is UIPopup)
             {
                 RemovePopupFromStack(id);
+            }
+
+            if (instance is UIOverlay)
+            {
+                RemoveOverlayFromOrder(id);
             }
 
             if (instance is UIScreen screen && currentScreen == screen)
@@ -313,6 +354,15 @@ namespace CDG.UI
             CacheInstance(id, instance);
 
             return Result<T>.Success((T)instance);
+        }
+
+        internal int OpenOverlayCount
+        {
+            get
+            {
+                CleanupOpenOverlayOrder();
+                return openOverlayOrder.Count;
+            }
         }
 
         internal void SetRegistry(UIRegistry registry)
@@ -566,6 +616,34 @@ namespace CDG.UI
             return Result<UIPopup>.Success(popup);
         }
 
+        private Result<UIOverlay> PrepareOverlayForOpen(UIId id)
+        {
+            Result<UIOverlay> instanceResult = GetOrCreate<UIOverlay>(id);
+
+            if (instanceResult.IsFailure)
+            {
+                return Result<UIOverlay>.Failure(instanceResult.Error);
+            }
+
+            UIOverlay overlay = instanceResult.Value;
+
+            Result stateResult = ValidateOpenState(overlay);
+
+            if (stateResult.IsFailure)
+            {
+                return Result<UIOverlay>.Failure(stateResult.Error);
+            }
+
+            Result validationResult = ValidateLifecycleView(overlay);
+
+            if (validationResult.IsFailure)
+            {
+                return Result<UIOverlay>.Failure(validationResult.Error);
+            }
+
+            return Result<UIOverlay>.Success(overlay);
+        }
+
         private void RemovePopupFromStack(UIId id)
         {
             if (popupStack.Count == 0)
@@ -627,6 +705,42 @@ namespace CDG.UI
             while (temporaryStack.Count > 0)
             {
                 popupStack.Push(temporaryStack.Pop());
+            }
+        }
+
+        private void RemoveOverlayFromOrder(UIId id)
+        {
+            for (int i = openOverlayOrder.Count - 1; i >= 0; i--)
+            {
+                if (openOverlayOrder[i] == id)
+                {
+                    openOverlayOrder.RemoveAt(i);
+                }
+            }
+        }
+
+        private void CleanupOpenOverlayOrder()
+        {
+            for (int i = openOverlayOrder.Count - 1; i >= 0; i--)
+            {
+                UIId id = openOverlayOrder[i];
+
+                if (!TryGetCachedInstance(id, out UIView instance))
+                {
+                    openOverlayOrder.RemoveAt(i);
+                    continue;
+                }
+
+                if (instance is not UIOverlay overlay)
+                {
+                    openOverlayOrder.RemoveAt(i);
+                    continue;
+                }
+
+                if (overlay.State == UIViewState.Closed)
+                {
+                    openOverlayOrder.RemoveAt(i);
+                }
             }
         }
 
