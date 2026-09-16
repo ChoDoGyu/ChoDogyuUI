@@ -60,5 +60,16 @@
         /// UI가 Opening 또는 Closing 상태여서 새로운 Lifecycle 요청을 처리할 수 없을 때 사용하는 오류 코드입니다.
         /// </summary>
         public const string Busy = "UI_BUSY";
+
+        /// <summary>
+        /// Blocking Overlay가 현재 Back 처리를 차단하고 있을 때 사용하는 오류 코드입니다.
+        /// Overlay 자체는 Back으로 닫히지 않습니다.
+        /// </summary>
+        public const string BackBlocked = "UI_BACK_BLOCKED";
+
+        /// <summary>
+        /// 닫을 Popup이나 복원할 Screen History가 없어 Back으로 처리할 대상이 없을 때 사용하는 오류 코드입니다.
+        /// </summary>
+        public const string NoBackTarget = "UI_NO_BACK_TARGET";
     }
 }

@@ -53,6 +53,38 @@ namespace CDG.UI
             }
         }
 
+        internal bool HasBlockingOverlay(UIOverlayLayer layer, UIInstanceStore instanceStore)
+        {
+            Cleanup(instanceStore);
+
+            for (int i = overlayIds.Count - 1; i >= 0; i--)
+            {
+                UIId id = overlayIds[i];
+
+                if (!instanceStore.TryGet(id, out UIView instance))
+                {
+                    continue;
+                }
+
+                if (instance is not UIOverlay overlay)
+                {
+                    continue;
+                }
+
+                if (overlay.OverlayLayer != layer)
+                {
+                    continue;
+                }
+
+                if (overlay.BlocksInput)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         internal IEnumerable<UIId> EnumerateTopToBottom(UIOverlayLayer layer, UIInstanceStore instanceStore)
         {
             for (int i = overlayIds.Count - 1; i >= 0; i--)

@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using CDG.Core.Results;
 using UnityEngine;
 
@@ -7,7 +6,7 @@ namespace CDG.UI
 {
     /// <summary>
     /// Registry에 등록된 UI의 Runtime Instance와 화면 흐름을 관리하는 중심 Controller입니다.
-    /// Screen Navigation, Popup Stack, Overlay 관리 기능을 조율하고 외부에 일관된 UI 제어 진입점을 제공합니다.
+    /// 각 Runtime 관리 구성 요소를 조율하고 외부에 일관된 UI 제어 진입점을 제공합니다.
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class UIController : MonoBehaviour
@@ -28,12 +27,10 @@ namespace CDG.UI
         private Transform topOverlayLayer;
 
         private readonly UIInstanceStore instanceStore = new UIInstanceStore();
-        private readonly Stack<UIId> screenHistory = new Stack<UIId>();
+        private readonly UIScreenNavigator screenNavigator = new UIScreenNavigator();
         private readonly UIPopupStack popupStack = new UIPopupStack();
         private readonly UIOverlayOrder overlayOrder = new UIOverlayOrder();
         private readonly UIInputCoordinator inputCoordinator = new UIInputCoordinator();
-
-        private UIScreen currentScreen;
 
         /// <summary>
         /// Controller가 UI Prefab 조회에 사용하는 Registry를 반환합니다.
@@ -64,13 +61,13 @@ namespace CDG.UI
         /// 현재 열려 있는 Screen을 반환합니다.
         /// 아직 Screen Navigation이 시작되지 않았거나 현재 Screen이 파괴된 경우 null일 수 있습니다.
         /// </summary>
-        public UIScreen CurrentScreen => currentScreen;
+        public UIScreen CurrentScreen => screenNavigator.CurrentScreen;
 
         /// <summary>
         /// Back으로 복원할 수 있도록 보관 중인 이전 Screen의 개수를 반환합니다.
         /// History 컬렉션 자체는 외부에 노출하지 않습니다.
         /// </summary>
-        public int ScreenHistoryCount => screenHistory.Count;
+        public int ScreenHistoryCount => screenNavigator.HistoryCount;
 
         /// <summary>
         /// 현재 Popup Stack의 최상단 Popup을 반환합니다.
@@ -107,6 +104,124 @@ namespace CDG.UI
         }
 
         /// <summary>
+        /// 현재 UI 상태에서 Back 요청을 처리할 수 있는지 여부를 반환합니다.
+        /// Blocking Overlay가 Back 전달을 막거나 대상 UI가 전환 중인 경우 false를 반환합니다.
+        /// </summary>
+        public bool CanBack
+        {
+            get
+            {
+                popupStack.Cleanup(instanceStore);
+                overlayOrder.Cleanup(instanceStore);
+
+                if (overlayOrder.HasBlockingOverlay(
+                    UIOverlayLayer.Topmost,
+                    instanceStore))
+                {
+                    return false;
+                }
+
+                if (popupStack.TryPeek(out UIId popupId))
+                {
+                    if (!instanceStore.TryGet(popupId, out UIView popupInstance))
+                    {
+                        return false;
+                    }
+
+                    if (popupInstance is not UIPopup popup)
+                    {
+                        return false;
+                    }
+
+                    return popup.State == UIViewState.Open;
+                }
+
+                if (overlayOrder.HasBlockingOverlay(
+                    UIOverlayLayer.Normal,
+                    instanceStore))
+                {
+                    return false;
+                }
+
+                if (screenNavigator.HistoryCount == 0)
+                {
+                    return false;
+                }
+
+                UIScreen currentScreen = screenNavigator.CurrentScreen;
+
+                return currentScreen == null ||
+                    currentScreen.State == UIViewState.Open;
+            }
+        }
+
+        /// <summary>
+        /// 현재 UI 상태의 우선순위에 따라 Back 요청을 처리합니다.
+        /// Blocking Overlay는 Back 전달을 차단하고, Popup이 있으면 최상단 Popup을 닫으며,
+        /// 그 외에는 Screen History의 이전 Screen을 복원합니다.
+        /// </summary>
+        /// <returns>Back 처리 성공 또는 처리할 수 없는 원인을 포함하는 결과입니다.</returns>
+        public Result Back()
+        {
+            popupStack.Cleanup(instanceStore);
+            overlayOrder.Cleanup(instanceStore);
+
+            if (overlayOrder.HasBlockingOverlay(
+                UIOverlayLayer.Topmost,
+                instanceStore))
+            {
+                return Result.Failure(new ResultError(
+                    UIErrorCodes.BackBlocked,
+                    "Topmost Overlay가 현재 Back 전달을 차단하고 있습니다."));
+            }
+
+            if (popupStack.TryPeek(out UIId popupId))
+            {
+                if (!instanceStore.TryGet(popupId, out UIView popupInstance) ||
+                    popupInstance is not UIPopup popup)
+                {
+                    return Result.Failure(new ResultError(
+                        UIErrorCodes.NoBackTarget,
+                        "Back으로 처리할 유효한 Popup을 찾을 수 없습니다."));
+                }
+
+                if (popup.IsTransitioning)
+                {
+                    return Result.Failure(new ResultError(
+                        UIErrorCodes.Busy,
+                        $"Popup '{popup.Id}'는 현재 {popup.State} 상태이므로 Back 요청을 처리할 수 없습니다."));
+                }
+
+                return Close(popup.Id);
+            }
+
+            if (overlayOrder.HasBlockingOverlay(
+                UIOverlayLayer.Normal,
+                instanceStore))
+            {
+                return Result.Failure(new ResultError(
+                    UIErrorCodes.BackBlocked,
+                    "Normal Overlay가 현재 Screen History로의 Back 전달을 차단하고 있습니다."));
+            }
+
+            if (screenNavigator.HistoryCount == 0)
+            {
+                return Result.Failure(new ResultError(
+                    UIErrorCodes.NoBackTarget,
+                    "Back으로 닫을 Popup이나 복원할 Screen History가 없습니다."));
+            }
+
+            Result restoreResult = screenNavigator.RestorePrevious(this);
+
+            if (restoreResult.IsSuccess)
+            {
+                RefreshInputState();
+            }
+
+            return restoreResult;
+        }
+
+        /// <summary>
         /// 현재 Screen을 History에 보존하는 Push 방식으로 지정한 Screen을 엽니다.
         /// 현재 Screen이 없다면 History를 변경하지 않고 대상 Screen을 최초 Screen으로 엽니다.
         /// </summary>
@@ -127,25 +242,10 @@ namespace CDG.UI
         /// <returns>열린 Screen 또는 Navigation 실패 정보를 포함하는 결과입니다.</returns>
         public Result<UIScreen> OpenScreen(UIId id, UIScreenOpenMode mode)
         {
-            Result<UIScreen> result;
-
-            switch (mode)
-            {
-                case UIScreenOpenMode.Push:
-                    result = PushScreen(id);
-                    break;
-
-                case UIScreenOpenMode.Replace:
-                    result = ReplaceScreen(id);
-                    break;
-
-                case UIScreenOpenMode.Reset:
-                    result = ResetScreen(id);
-                    break;
-
-                default:
-                    throw new ArgumentOutOfRangeException(nameof(mode), mode, "지원하지 않는 Screen Open Mode입니다.");
-            }
+            Result<UIScreen> result = screenNavigator.Open(
+                this,
+                id,
+                mode);
 
             if (result.IsSuccess)
             {
@@ -163,7 +263,7 @@ namespace CDG.UI
         /// <returns>열린 Popup 또는 실패 정보를 포함하는 결과입니다.</returns>
         public Result<UIPopup> OpenPopup(UIId id)
         {
-            Result<UIPopup> targetResult = PreparePopupForOpen(id);
+            Result<UIPopup> targetResult = PrepareViewForOpen<UIPopup>(id);
 
             if (targetResult.IsFailure)
             {
@@ -197,7 +297,7 @@ namespace CDG.UI
         {
             overlayOrder.Cleanup(instanceStore);
 
-            Result<UIOverlay> targetResult = PrepareOverlayForOpen(id);
+            Result<UIOverlay> targetResult = PrepareViewForOpen<UIOverlay>(id);
 
             if (targetResult.IsFailure)
             {
@@ -277,9 +377,9 @@ namespace CDG.UI
                 overlayOrder.Remove(id);
             }
 
-            if (instance is UIScreen screen && currentScreen == screen)
+            if (instance is UIScreen screen)
             {
-                currentScreen = null;
+                screenNavigator.HandleClosedScreen(screen);
             }
 
             RefreshInputState();
@@ -366,7 +466,10 @@ namespace CDG.UI
                 return Result<T>.Failure(layerResult.Error);
             }
 
-            UIView instance = Instantiate(prefab, layerResult.Value, false);
+            UIView instance = Instantiate(
+                prefab,
+                layerResult.Value,
+                false);
 
             CacheInstance(id, instance);
 
@@ -395,6 +498,34 @@ namespace CDG.UI
             this.topOverlayLayer = topOverlayLayer;
         }
 
+        internal Result<T> PrepareViewForOpen<T>(UIId id) where T : UIView
+        {
+            Result<T> instanceResult = GetOrCreate<T>(id);
+
+            if (instanceResult.IsFailure)
+            {
+                return Result<T>.Failure(instanceResult.Error);
+            }
+
+            T view = instanceResult.Value;
+
+            Result stateResult = ValidateOpenState(view);
+
+            if (stateResult.IsFailure)
+            {
+                return Result<T>.Failure(stateResult.Error);
+            }
+
+            Result validationResult = ValidateLifecycleView(view);
+
+            if (validationResult.IsFailure)
+            {
+                return Result<T>.Failure(validationResult.Error);
+            }
+
+            return Result<T>.Success(view);
+        }
+
         internal Result<T> OpenView<T>(UIId id) where T : UIView
         {
             Result<T> instanceResult = GetOrCreate<T>(id);
@@ -405,6 +536,7 @@ namespace CDG.UI
             }
 
             T view = instanceResult.Value;
+
             Result stateResult = ValidateOpenState(view);
 
             if (stateResult.IsFailure)
@@ -472,189 +604,13 @@ namespace CDG.UI
             instanceStore.Clear();
         }
 
-        private Result<UIScreen> PushScreen(UIId id)
-        {
-            Result<UIScreen> targetResult = PrepareScreenForOpen(id);
-
-            if (targetResult.IsFailure)
-            {
-                return Result<UIScreen>.Failure(targetResult.Error);
-            }
-
-            UIScreen previousScreen = currentScreen;
-
-            Result navigationResult = ChangeCurrentScreen(id);
-
-            if (navigationResult.IsFailure)
-            {
-                return Result<UIScreen>.Failure(navigationResult.Error);
-            }
-
-            if (previousScreen != null)
-            {
-                screenHistory.Push(previousScreen.Id);
-            }
-
-            return Result<UIScreen>.Success(currentScreen);
-        }
-
-        private Result<UIScreen> ReplaceScreen(UIId id)
-        {
-            Result<UIScreen> targetResult = PrepareScreenForOpen(id);
-
-            if (targetResult.IsFailure)
-            {
-                return Result<UIScreen>.Failure(targetResult.Error);
-            }
-
-            Result navigationResult = ChangeCurrentScreen(id);
-
-            if (navigationResult.IsFailure)
-            {
-                return Result<UIScreen>.Failure(navigationResult.Error);
-            }
-
-            return Result<UIScreen>.Success(currentScreen);
-        }
-
-        private Result<UIScreen> ResetScreen(UIId id)
-        {
-            Result<UIScreen> targetResult = PrepareScreenForOpen(id);
-
-            if (targetResult.IsFailure)
-            {
-                return Result<UIScreen>.Failure(targetResult.Error);
-            }
-
-            Result navigationResult = ChangeCurrentScreen(id);
-
-            if (navigationResult.IsFailure)
-            {
-                return Result<UIScreen>.Failure(navigationResult.Error);
-            }
-
-            screenHistory.Clear();
-
-            return Result<UIScreen>.Success(currentScreen);
-        }
-
-        private Result ChangeCurrentScreen(UIId id)
-        {
-            UIScreen previousScreen = currentScreen;
-
-            if (previousScreen != null)
-            {
-                Result closeResult = CloseView(previousScreen);
-
-                if (closeResult.IsFailure)
-                {
-                    return closeResult;
-                }
-            }
-
-            Result<UIScreen> openResult = OpenView<UIScreen>(id);
-
-            if (openResult.IsFailure)
-            {
-                return Result.Failure(openResult.Error);
-            }
-
-            currentScreen = openResult.Value;
-
-            return Result.Success();
-        }
-
-        private Result<UIScreen> PrepareScreenForOpen(UIId id)
-        {
-            Result<UIScreen> instanceResult = GetOrCreate<UIScreen>(id);
-
-            if (instanceResult.IsFailure)
-            {
-                return Result<UIScreen>.Failure(instanceResult.Error);
-            }
-
-            UIScreen screen = instanceResult.Value;
-
-            Result stateResult = ValidateOpenState(screen);
-
-            if (stateResult.IsFailure)
-            {
-                return Result<UIScreen>.Failure(stateResult.Error);
-            }
-
-            Result validationResult = ValidateLifecycleView(screen);
-
-            if (validationResult.IsFailure)
-            {
-                return Result<UIScreen>.Failure(validationResult.Error);
-            }
-
-            return Result<UIScreen>.Success(screen);
-        }
-
-        private Result<UIPopup> PreparePopupForOpen(UIId id)
-        {
-            Result<UIPopup> instanceResult = GetOrCreate<UIPopup>(id);
-
-            if (instanceResult.IsFailure)
-            {
-                return Result<UIPopup>.Failure(instanceResult.Error);
-            }
-
-            UIPopup popup = instanceResult.Value;
-
-            Result stateResult = ValidateOpenState(popup);
-
-            if (stateResult.IsFailure)
-            {
-                return Result<UIPopup>.Failure(stateResult.Error);
-            }
-
-            Result validationResult = ValidateLifecycleView(popup);
-
-            if (validationResult.IsFailure)
-            {
-                return Result<UIPopup>.Failure(validationResult.Error);
-            }
-
-            return Result<UIPopup>.Success(popup);
-        }
-
-        private Result<UIOverlay> PrepareOverlayForOpen(UIId id)
-        {
-            Result<UIOverlay> instanceResult = GetOrCreate<UIOverlay>(id);
-
-            if (instanceResult.IsFailure)
-            {
-                return Result<UIOverlay>.Failure(instanceResult.Error);
-            }
-
-            UIOverlay overlay = instanceResult.Value;
-
-            Result stateResult = ValidateOpenState(overlay);
-
-            if (stateResult.IsFailure)
-            {
-                return Result<UIOverlay>.Failure(stateResult.Error);
-            }
-
-            Result validationResult = ValidateLifecycleView(overlay);
-
-            if (validationResult.IsFailure)
-            {
-                return Result<UIOverlay>.Failure(validationResult.Error);
-            }
-
-            return Result<UIOverlay>.Success(overlay);
-        }
-
         private void RefreshInputState()
         {
             inputCoordinator.Refresh(
                 instanceStore,
                 popupStack,
                 overlayOrder,
-                currentScreen);
+                screenNavigator.CurrentScreen);
         }
 
         private Result ValidateOpenState(UIView view)
