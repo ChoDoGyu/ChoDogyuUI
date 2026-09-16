@@ -54,11 +54,6 @@ namespace CDG.UI
             this.id = id;
         }
 
-        internal void SetState(UIViewState state)
-        {
-            this.state = state;
-        }
-
         internal void BeginOpening()
         {
             state = UIViewState.Opening;

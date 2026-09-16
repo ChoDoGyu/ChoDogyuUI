@@ -335,13 +335,10 @@ namespace CDG.UI.Tests.Runtime
             UIScreen prefab = CreatePrefab<UIScreen>("screen.main");
             ConfigureRegistry(prefab);
 
-            Result<UIScreen> result = controller.GetOrCreate<UIScreen>(
+            Result<UIScreen> result = controller.OpenView<UIScreen>(
                 new UIId("screen.main"));
 
             Assert.That(result.IsSuccess, Is.True);
-
-            result.Value.SetState(UIViewState.Open);
-
             Assert.That(controller.IsOpen(new UIId("screen.main")), Is.True);
         }
 
@@ -351,12 +348,11 @@ namespace CDG.UI.Tests.Runtime
             UIScreen prefab = CreatePrefab<UIScreen>("screen.main");
             ConfigureRegistry(prefab);
 
-            Result<UIScreen> result = controller.GetOrCreate<UIScreen>(
+            Result<UIScreen> result = controller.OpenView<UIScreen>(
                 new UIId("screen.main"));
 
             Assert.That(result.IsSuccess, Is.True);
 
-            result.Value.SetState(UIViewState.Open);
             Object.DestroyImmediate(result.Value.gameObject);
 
             Assert.That(controller.IsOpen(new UIId("screen.main")), Is.False);

@@ -45,27 +45,6 @@ namespace CDG.UI.Tests.Runtime
         }
 
         [Test]
-        public void SetState_Open_UpdatesStateAndIsOpen()
-        {
-            view.SetState(UIViewState.Open);
-
-            Assert.That(view.State, Is.EqualTo(UIViewState.Open));
-            Assert.That(view.IsOpen, Is.True);
-            Assert.That(view.IsTransitioning, Is.False);
-        }
-
-        [TestCase(UIViewState.Opening)]
-        [TestCase(UIViewState.Closing)]
-        public void SetState_TransitionState_IsTransitioning(UIViewState state)
-        {
-            view.SetState(state);
-
-            Assert.That(view.State, Is.EqualTo(state));
-            Assert.That(view.IsOpen, Is.False);
-            Assert.That(view.IsTransitioning, Is.True);
-        }
-
-        [Test]
         public void CanvasGroup_ReturnsAttachedCanvasGroup()
         {
             Assert.That(view.CanvasGroup, Is.SameAs(canvasGroup));

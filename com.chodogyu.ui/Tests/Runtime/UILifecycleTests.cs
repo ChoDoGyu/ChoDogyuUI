@@ -343,21 +343,22 @@ namespace CDG.UI.Tests.Runtime
         [Test]
         public void OpenView_AlreadyOpen_PrecedesMissingCanvasGroup()
         {
-            LifecycleScreen prefab = CreatePrefab<LifecycleScreen>("screen.main", false);
+            LifecycleScreen prefab = CreatePrefab<LifecycleScreen>("screen.main", true);
             ConfigureRegistry(prefab);
 
-            Result<LifecycleScreen> instanceResult = controller.GetOrCreate<LifecycleScreen>(
+            Result<LifecycleScreen> firstResult = controller.OpenView<LifecycleScreen>(
                 new UIId("screen.main"));
 
-            Assert.That(instanceResult.IsSuccess, Is.True);
+            Assert.That(firstResult.IsSuccess, Is.True);
 
-            instanceResult.Value.SetState(UIViewState.Open);
+            CanvasGroup canvasGroup = firstResult.Value.CanvasGroup;
+            UnityEngine.Object.DestroyImmediate(canvasGroup);
 
-            Result<LifecycleScreen> result = controller.OpenView<LifecycleScreen>(
+            Result<LifecycleScreen> secondResult = controller.OpenView<LifecycleScreen>(
                 new UIId("screen.main"));
 
-            Assert.That(result.IsFailure, Is.True);
-            Assert.That(result.Error.Code, Is.EqualTo(UIErrorCodes.AlreadyOpen));
+            Assert.That(secondResult.IsFailure, Is.True);
+            Assert.That(secondResult.Error.Code, Is.EqualTo(UIErrorCodes.AlreadyOpen));
         }
 
         [Test]
