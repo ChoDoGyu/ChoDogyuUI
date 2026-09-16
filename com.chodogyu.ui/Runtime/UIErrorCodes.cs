@@ -25,5 +25,20 @@
         /// Registry에 동일한 UI ID가 두 번 이상 등록되어 있을 때 사용하는 오류 코드입니다.
         /// </summary>
         public const string DuplicateId = "UI_DUPLICATE_ID";
+
+        /// <summary>
+        /// UIController에 Registry가 지정되지 않았을 때 사용하는 오류 코드입니다.
+        /// </summary>
+        public const string MissingRegistry = "UI_MISSING_REGISTRY";
+
+        /// <summary>
+        /// UI Runtime Instance를 배치할 Layer가 지정되지 않았을 때 사용하는 오류 코드입니다.
+        /// </summary>
+        public const string MissingLayer = "UI_MISSING_LAYER";
+
+        /// <summary>
+        /// 등록된 View 타입과 요청한 View 타입이 호환되지 않을 때 사용하는 오류 코드입니다.
+        /// </summary>
+        public const string InvalidType = "UI_INVALID_TYPE";
     }
 }
