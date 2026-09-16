@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using CDG.Core.Results;
 using UnityEngine;
 
@@ -152,6 +153,63 @@ namespace CDG.UI
             this.topOverlayLayer = topOverlayLayer;
         }
 
+        internal Result<T> OpenView<T>(UIId id) where T : UIView
+        {
+            Result<T> instanceResult = GetOrCreate<T>(id);
+
+            if (instanceResult.IsFailure)
+            {
+                return Result<T>.Failure(instanceResult.Error);
+            }
+
+            T view = instanceResult.Value;
+            Result stateResult = ValidateOpenState(view);
+
+            if (stateResult.IsFailure)
+            {
+                return Result<T>.Failure(stateResult.Error);
+            }
+
+            Result validationResult = ValidateLifecycleView(view);
+
+            if (validationResult.IsFailure)
+            {
+                return Result<T>.Failure(validationResult.Error);
+            }
+
+            view.BeginOpening();
+            view.CompleteOpening();
+
+            return Result<T>.Success(view);
+        }
+
+        internal Result CloseView(UIView view)
+        {
+            if (view == null)
+            {
+                throw new ArgumentNullException(nameof(view));
+            }
+
+            Result stateResult = ValidateCloseState(view);
+
+            if (stateResult.IsFailure)
+            {
+                return stateResult;
+            }
+
+            Result validationResult = ValidateLifecycleView(view);
+
+            if (validationResult.IsFailure)
+            {
+                return validationResult;
+            }
+
+            view.BeginClosing();
+            view.CompleteClosing();
+
+            return Result.Success();
+        }
+
         internal bool TryGetCachedInstance(UIId id, out UIView instance)
         {
             if (!instances.TryGetValue(id, out instance))
@@ -183,6 +241,56 @@ namespace CDG.UI
         internal void ClearInstanceCache()
         {
             instances.Clear();
+        }
+
+        private Result ValidateOpenState(UIView view)
+        {
+            if (view.State == UIViewState.Open)
+            {
+                return Result.Failure(new ResultError(
+                    UIErrorCodes.AlreadyOpen,
+                    $"UI '{view.Id}'는 이미 열린 상태입니다."));
+            }
+
+            if (view.IsTransitioning)
+            {
+                return Result.Failure(new ResultError(
+                    UIErrorCodes.Busy,
+                    $"UI '{view.Id}'는 현재 {view.State} 상태이므로 Open 요청을 처리할 수 없습니다."));
+            }
+
+            return Result.Success();
+        }
+
+        private Result ValidateCloseState(UIView view)
+        {
+            if (view.State == UIViewState.Closed)
+            {
+                return Result.Failure(new ResultError(
+                    UIErrorCodes.AlreadyClosed,
+                    $"UI '{view.Id}'는 이미 닫힌 상태입니다."));
+            }
+
+            if (view.IsTransitioning)
+            {
+                return Result.Failure(new ResultError(
+                    UIErrorCodes.Busy,
+                    $"UI '{view.Id}'는 현재 {view.State} 상태이므로 Close 요청을 처리할 수 없습니다."));
+            }
+
+            return Result.Success();
+        }
+
+        private Result ValidateLifecycleView(UIView view)
+        {
+            if (view.CanvasGroup == null)
+            {
+                return Result.Failure(new ResultError(
+                    UIErrorCodes.MissingCanvasGroup,
+                    $"UI '{view.Id}'에 Lifecycle 및 입력 제어에 필요한 CanvasGroup이 없습니다."));
+            }
+
+            return Result.Success();
         }
 
         private Result<Transform> ResolveLayer(UIView prefab)

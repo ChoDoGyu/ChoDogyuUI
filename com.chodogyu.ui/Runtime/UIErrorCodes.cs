@@ -40,5 +40,25 @@
         /// 등록된 View 타입과 요청한 View 타입이 호환되지 않을 때 사용하는 오류 코드입니다.
         /// </summary>
         public const string InvalidType = "UI_INVALID_TYPE";
+
+        /// <summary>
+        /// UI Lifecycle과 입력 상태를 관리하는 데 필요한 CanvasGroup이 없을 때 사용하는 오류 코드입니다.
+        /// </summary>
+        public const string MissingCanvasGroup = "UI_MISSING_CANVAS_GROUP";
+
+        /// <summary>
+        /// 이미 완전히 열린 UI에 다시 Open을 요청했을 때 사용하는 오류 코드입니다.
+        /// </summary>
+        public const string AlreadyOpen = "UI_ALREADY_OPEN";
+
+        /// <summary>
+        /// 이미 완전히 닫힌 UI에 다시 Close를 요청했을 때 사용하는 오류 코드입니다.
+        /// </summary>
+        public const string AlreadyClosed = "UI_ALREADY_CLOSED";
+
+        /// <summary>
+        /// UI가 Opening 또는 Closing 상태여서 새로운 Lifecycle 요청을 처리할 수 없을 때 사용하는 오류 코드입니다.
+        /// </summary>
+        public const string Busy = "UI_BUSY";
     }
 }

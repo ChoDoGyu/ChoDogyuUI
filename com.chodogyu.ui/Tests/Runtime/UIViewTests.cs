@@ -72,12 +72,85 @@ namespace CDG.UI.Tests.Runtime
         }
 
         [Test]
-        public void InvokeLifecycle_CallsLifecycleHooks()
+        public void BeginOpening_SetsOpeningStateDisablesInputAndCallsHook()
         {
-            view.InvokeOpening();
-            view.InvokeOpened();
-            view.InvokeClosing();
-            view.InvokeClosed();
+            gameObject.SetActive(false);
+
+            view.BeginOpening();
+
+            Assert.That(view.State, Is.EqualTo(UIViewState.Opening));
+            Assert.That(view.IsOpen, Is.False);
+            Assert.That(view.IsTransitioning, Is.True);
+
+            Assert.That(canvasGroup.interactable, Is.False);
+            Assert.That(canvasGroup.blocksRaycasts, Is.False);
+
+            Assert.That(gameObject.activeSelf, Is.True);
+            Assert.That(view.OpeningCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void CompleteOpening_SetsOpenStateEnablesInputAndCallsHook()
+        {
+            view.BeginOpening();
+
+            view.CompleteOpening();
+
+            Assert.That(view.State, Is.EqualTo(UIViewState.Open));
+            Assert.That(view.IsOpen, Is.True);
+            Assert.That(view.IsTransitioning, Is.False);
+
+            Assert.That(canvasGroup.interactable, Is.True);
+            Assert.That(canvasGroup.blocksRaycasts, Is.True);
+
+            Assert.That(view.OpenedCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void BeginClosing_SetsClosingStateDisablesInputAndCallsHook()
+        {
+            view.BeginOpening();
+            view.CompleteOpening();
+
+            view.BeginClosing();
+
+            Assert.That(view.State, Is.EqualTo(UIViewState.Closing));
+            Assert.That(view.IsOpen, Is.False);
+            Assert.That(view.IsTransitioning, Is.True);
+
+            Assert.That(canvasGroup.interactable, Is.False);
+            Assert.That(canvasGroup.blocksRaycasts, Is.False);
+
+            Assert.That(view.ClosingCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void CompleteClosing_DisablesGameObjectSetsClosedStateAndCallsHook()
+        {
+            view.BeginOpening();
+            view.CompleteOpening();
+            view.BeginClosing();
+
+            view.CompleteClosing();
+
+            Assert.That(gameObject.activeSelf, Is.False);
+
+            Assert.That(view.State, Is.EqualTo(UIViewState.Closed));
+            Assert.That(view.IsOpen, Is.False);
+            Assert.That(view.IsTransitioning, Is.False);
+
+            Assert.That(view.ClosedCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void Lifecycle_CallsEachHookOnce()
+        {
+            gameObject.SetActive(false);
+
+            view.BeginOpening();
+            view.CompleteOpening();
+            view.BeginClosing();
+            view.CompleteClosing();
 
             Assert.That(view.OpeningCount, Is.EqualTo(1));
             Assert.That(view.OpenedCount, Is.EqualTo(1));

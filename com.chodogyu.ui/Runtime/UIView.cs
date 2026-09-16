@@ -59,24 +59,58 @@ namespace CDG.UI
             this.state = state;
         }
 
-        internal void InvokeOpening()
+        internal void BeginOpening()
         {
+            state = UIViewState.Opening;
+            SetLocalInputEnabled(false);
+
             OnOpening();
+
+            if (!gameObject.activeSelf)
+            {
+                gameObject.SetActive(true);
+            }
         }
 
-        internal void InvokeOpened()
+        internal void CompleteOpening()
         {
+            state = UIViewState.Open;
+            SetLocalInputEnabled(true);
+
             OnOpened();
         }
 
-        internal void InvokeClosing()
+        internal void BeginClosing()
         {
+            state = UIViewState.Closing;
+            SetLocalInputEnabled(false);
+
             OnClosing();
         }
 
-        internal void InvokeClosed()
+        internal void CompleteClosing()
         {
+            if (gameObject.activeSelf)
+            {
+                gameObject.SetActive(false);
+            }
+
+            state = UIViewState.Closed;
+
             OnClosed();
+        }
+
+        private void SetLocalInputEnabled(bool enabled)
+        {
+            CanvasGroup group = CanvasGroup;
+
+            if (group == null)
+            {
+                return;
+            }
+
+            group.interactable = enabled;
+            group.blocksRaycasts = enabled;
         }
 
         /// <summary>
