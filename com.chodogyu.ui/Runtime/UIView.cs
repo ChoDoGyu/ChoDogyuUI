@@ -57,7 +57,7 @@ namespace CDG.UI
         internal void BeginOpening()
         {
             state = UIViewState.Opening;
-            SetLocalInputEnabled(false);
+            SetInputEnabled(false);
 
             OnOpening();
 
@@ -70,7 +70,7 @@ namespace CDG.UI
         internal void CompleteOpening()
         {
             state = UIViewState.Open;
-            SetLocalInputEnabled(true);
+            SetInputEnabled(true);
 
             OnOpened();
         }
@@ -78,7 +78,7 @@ namespace CDG.UI
         internal void BeginClosing()
         {
             state = UIViewState.Closing;
-            SetLocalInputEnabled(false);
+            SetInputEnabled(false);
 
             OnClosing();
         }
@@ -95,7 +95,7 @@ namespace CDG.UI
             OnClosed();
         }
 
-        private void SetLocalInputEnabled(bool enabled)
+        internal void SetInputEnabled(bool enabled)
         {
             CanvasGroup group = CanvasGroup;
 

@@ -29,5 +29,10 @@ namespace CDG.UI
         {
             this.overlayLayer = overlayLayer;
         }
+
+        internal void SetBlocksInput(bool blocksInput)
+        {
+            this.blocksInput = blocksInput;
+        }
     }
 }

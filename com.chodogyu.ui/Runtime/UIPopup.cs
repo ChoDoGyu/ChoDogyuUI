@@ -16,5 +16,10 @@ namespace CDG.UI
         /// 기본값은 true입니다.
         /// </summary>
         public bool BlocksInput => blocksInput;
+
+        internal void SetBlocksInput(bool blocksInput)
+        {
+            this.blocksInput = blocksInput;
+        }
     }
 }

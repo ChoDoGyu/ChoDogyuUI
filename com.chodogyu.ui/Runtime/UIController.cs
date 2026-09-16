@@ -7,7 +7,7 @@ namespace CDG.UI
 {
     /// <summary>
     /// Registry에 등록된 UI의 Runtime Instance와 화면 흐름을 관리하는 중심 Controller입니다.
-    /// Screen Navigation, Popup Stack, Overlay 관리 기능을 통해 UI 흐름을 일관된 방식으로 제어합니다.
+    /// Screen Navigation, Popup Stack, Overlay 관리 기능을 조율하고 외부에 일관된 UI 제어 진입점을 제공합니다.
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class UIController : MonoBehaviour
@@ -27,10 +27,11 @@ namespace CDG.UI
         [SerializeField]
         private Transform topOverlayLayer;
 
-        private readonly Dictionary<UIId, UIView> instances = new Dictionary<UIId, UIView>();
+        private readonly UIInstanceStore instanceStore = new UIInstanceStore();
         private readonly Stack<UIId> screenHistory = new Stack<UIId>();
-        private readonly Stack<UIId> popupStack = new Stack<UIId>();
-        private readonly List<UIId> openOverlayOrder = new List<UIId>();
+        private readonly UIPopupStack popupStack = new UIPopupStack();
+        private readonly UIOverlayOrder overlayOrder = new UIOverlayOrder();
+        private readonly UIInputCoordinator inputCoordinator = new UIInputCoordinator();
 
         private UIScreen currentScreen;
 
@@ -79,16 +80,14 @@ namespace CDG.UI
         {
             get
             {
-                CleanupPopupStack();
+                popupStack.Cleanup(instanceStore);
 
-                if (popupStack.Count == 0)
+                if (!popupStack.TryPeek(out UIId topId))
                 {
                     return null;
                 }
 
-                UIId topId = popupStack.Peek();
-
-                return TryGetCachedInstance(topId, out UIView instance)
+                return instanceStore.TryGet(topId, out UIView instance)
                     ? instance as UIPopup
                     : null;
             }
@@ -102,7 +101,7 @@ namespace CDG.UI
         {
             get
             {
-                CleanupPopupStack();
+                popupStack.Cleanup(instanceStore);
                 return popupStack.Count;
             }
         }
@@ -128,20 +127,32 @@ namespace CDG.UI
         /// <returns>열린 Screen 또는 Navigation 실패 정보를 포함하는 결과입니다.</returns>
         public Result<UIScreen> OpenScreen(UIId id, UIScreenOpenMode mode)
         {
+            Result<UIScreen> result;
+
             switch (mode)
             {
                 case UIScreenOpenMode.Push:
-                    return PushScreen(id);
+                    result = PushScreen(id);
+                    break;
 
                 case UIScreenOpenMode.Replace:
-                    return ReplaceScreen(id);
+                    result = ReplaceScreen(id);
+                    break;
 
                 case UIScreenOpenMode.Reset:
-                    return ResetScreen(id);
+                    result = ResetScreen(id);
+                    break;
 
                 default:
                     throw new ArgumentOutOfRangeException(nameof(mode), mode, "지원하지 않는 Screen Open Mode입니다.");
             }
+
+            if (result.IsSuccess)
+            {
+                RefreshInputState();
+            }
+
+            return result;
         }
 
         /// <summary>
@@ -171,6 +182,8 @@ namespace CDG.UI
             popup.transform.SetAsLastSibling();
             popupStack.Push(popup.Id);
 
+            RefreshInputState();
+
             return Result<UIPopup>.Success(popup);
         }
 
@@ -182,7 +195,7 @@ namespace CDG.UI
         /// <returns>열린 Overlay 또는 실패 정보를 포함하는 결과입니다.</returns>
         public Result<UIOverlay> OpenOverlay(UIId id)
         {
-            CleanupOpenOverlayOrder();
+            overlayOrder.Cleanup(instanceStore);
 
             Result<UIOverlay> targetResult = PrepareOverlayForOpen(id);
 
@@ -201,7 +214,9 @@ namespace CDG.UI
             UIOverlay overlay = openResult.Value;
 
             overlay.transform.SetAsLastSibling();
-            openOverlayOrder.Add(overlay.Id);
+            overlayOrder.Add(overlay.Id);
+
+            RefreshInputState();
 
             return Result<UIOverlay>.Success(overlay);
         }
@@ -215,7 +230,7 @@ namespace CDG.UI
         /// <returns>닫기 성공 또는 실패 정보를 포함하는 결과입니다.</returns>
         public Result Close(UIId id)
         {
-            CleanupOpenOverlayOrder();
+            overlayOrder.Cleanup(instanceStore);
 
             if (id.IsEmpty)
             {
@@ -254,18 +269,20 @@ namespace CDG.UI
 
             if (instance is UIPopup)
             {
-                RemovePopupFromStack(id);
+                popupStack.Remove(id);
             }
 
             if (instance is UIOverlay)
             {
-                RemoveOverlayFromOrder(id);
+                overlayOrder.Remove(id);
             }
 
             if (instance is UIScreen screen && currentScreen == screen)
             {
                 currentScreen = null;
             }
+
+            RefreshInputState();
 
             return Result.Success();
         }
@@ -360,8 +377,8 @@ namespace CDG.UI
         {
             get
             {
-                CleanupOpenOverlayOrder();
-                return openOverlayOrder.Count;
+                overlayOrder.Cleanup(instanceStore);
+                return overlayOrder.Count;
             }
         }
 
@@ -437,35 +454,22 @@ namespace CDG.UI
 
         internal bool TryGetCachedInstance(UIId id, out UIView instance)
         {
-            if (!instances.TryGetValue(id, out instance))
-            {
-                return false;
-            }
-
-            if (instance != null)
-            {
-                return true;
-            }
-
-            instances.Remove(id);
-            instance = null;
-
-            return false;
+            return instanceStore.TryGet(id, out instance);
         }
 
         internal void CacheInstance(UIId id, UIView instance)
         {
-            instances[id] = instance;
+            instanceStore.Cache(id, instance);
         }
 
         internal bool RemoveCachedInstance(UIId id)
         {
-            return instances.Remove(id);
+            return instanceStore.Remove(id);
         }
 
         internal void ClearInstanceCache()
         {
-            instances.Clear();
+            instanceStore.Clear();
         }
 
         private Result<UIScreen> PushScreen(UIId id)
@@ -644,104 +648,13 @@ namespace CDG.UI
             return Result<UIOverlay>.Success(overlay);
         }
 
-        private void RemovePopupFromStack(UIId id)
+        private void RefreshInputState()
         {
-            if (popupStack.Count == 0)
-            {
-                return;
-            }
-
-            Stack<UIId> temporaryStack = new Stack<UIId>();
-
-            while (popupStack.Count > 0)
-            {
-                UIId currentId = popupStack.Pop();
-
-                if (currentId == id)
-                {
-                    break;
-                }
-
-                temporaryStack.Push(currentId);
-            }
-
-            while (temporaryStack.Count > 0)
-            {
-                popupStack.Push(temporaryStack.Pop());
-            }
-        }
-
-        private void CleanupPopupStack()
-        {
-            if (popupStack.Count == 0)
-            {
-                return;
-            }
-
-            Stack<UIId> temporaryStack = new Stack<UIId>();
-
-            while (popupStack.Count > 0)
-            {
-                UIId id = popupStack.Pop();
-
-                if (!TryGetCachedInstance(id, out UIView instance))
-                {
-                    continue;
-                }
-
-                if (instance is not UIPopup popup)
-                {
-                    continue;
-                }
-
-                if (popup.State == UIViewState.Closed)
-                {
-                    continue;
-                }
-
-                temporaryStack.Push(id);
-            }
-
-            while (temporaryStack.Count > 0)
-            {
-                popupStack.Push(temporaryStack.Pop());
-            }
-        }
-
-        private void RemoveOverlayFromOrder(UIId id)
-        {
-            for (int i = openOverlayOrder.Count - 1; i >= 0; i--)
-            {
-                if (openOverlayOrder[i] == id)
-                {
-                    openOverlayOrder.RemoveAt(i);
-                }
-            }
-        }
-
-        private void CleanupOpenOverlayOrder()
-        {
-            for (int i = openOverlayOrder.Count - 1; i >= 0; i--)
-            {
-                UIId id = openOverlayOrder[i];
-
-                if (!TryGetCachedInstance(id, out UIView instance))
-                {
-                    openOverlayOrder.RemoveAt(i);
-                    continue;
-                }
-
-                if (instance is not UIOverlay overlay)
-                {
-                    openOverlayOrder.RemoveAt(i);
-                    continue;
-                }
-
-                if (overlay.State == UIViewState.Closed)
-                {
-                    openOverlayOrder.RemoveAt(i);
-                }
-            }
+            inputCoordinator.Refresh(
+                instanceStore,
+                popupStack,
+                overlayOrder,
+                currentScreen);
         }
 
         private Result ValidateOpenState(UIView view)
