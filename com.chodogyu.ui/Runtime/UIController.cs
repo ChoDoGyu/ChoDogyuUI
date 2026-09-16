@@ -7,7 +7,7 @@ namespace CDG.UI
 {
     /// <summary>
     /// Registry에 등록된 UI의 Runtime Instance와 화면 흐름을 관리하는 중심 Controller입니다.
-    /// Screen, Popup, Overlay의 실제 Navigation 기능은 각 전용 단계에서 확장됩니다.
+    /// Screen Navigation, Popup Stack, Overlay 관리 기능을 통해 UI 흐름을 일관된 방식으로 제어합니다.
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class UIController : MonoBehaviour
@@ -28,6 +28,9 @@ namespace CDG.UI
         private Transform topOverlayLayer;
 
         private readonly Dictionary<UIId, UIView> instances = new Dictionary<UIId, UIView>();
+        private readonly Stack<UIId> screenHistory = new Stack<UIId>();
+
+        private UIScreen currentScreen;
 
         /// <summary>
         /// Controller가 UI Prefab 조회에 사용하는 Registry를 반환합니다.
@@ -53,6 +56,55 @@ namespace CDG.UI
         /// 최상위 Overlay Runtime Instance가 배치되는 Transform을 반환합니다.
         /// </summary>
         public Transform TopOverlayLayer => topOverlayLayer;
+
+        /// <summary>
+        /// 현재 열려 있는 Screen을 반환합니다.
+        /// 아직 Screen Navigation이 시작되지 않았거나 현재 Screen이 파괴된 경우 null일 수 있습니다.
+        /// </summary>
+        public UIScreen CurrentScreen => currentScreen;
+
+        /// <summary>
+        /// Back으로 복원할 수 있도록 보관 중인 이전 Screen의 개수를 반환합니다.
+        /// History 컬렉션 자체는 외부에 노출하지 않습니다.
+        /// </summary>
+        public int ScreenHistoryCount => screenHistory.Count;
+
+        /// <summary>
+        /// 현재 Screen을 History에 보존하는 Push 방식으로 지정한 Screen을 엽니다.
+        /// 현재 Screen이 없다면 History를 변경하지 않고 대상 Screen을 최초 Screen으로 엽니다.
+        /// </summary>
+        /// <param name="id">열 Screen의 UI ID입니다.</param>
+        /// <returns>열린 Screen 또는 Navigation 실패 정보를 포함하는 결과입니다.</returns>
+        public Result<UIScreen> OpenScreen(UIId id)
+        {
+            return OpenScreen(id, UIScreenOpenMode.Push);
+        }
+
+        /// <summary>
+        /// 지정한 Navigation 방식으로 Screen을 엽니다.
+        /// Push는 현재 Screen을 History에 보존하고, Replace는 현재 History를 유지한 채 Screen만 교체하며,
+        /// Reset은 대상 Screen이 정상적으로 열린 후 기존 History를 모두 제거합니다.
+        /// </summary>
+        /// <param name="id">열 Screen의 UI ID입니다.</param>
+        /// <param name="mode">적용할 Screen Navigation 방식입니다.</param>
+        /// <returns>열린 Screen 또는 Navigation 실패 정보를 포함하는 결과입니다.</returns>
+        public Result<UIScreen> OpenScreen(UIId id, UIScreenOpenMode mode)
+        {
+            switch (mode)
+            {
+                case UIScreenOpenMode.Push:
+                    return PushScreen(id);
+
+                case UIScreenOpenMode.Replace:
+                    return ReplaceScreen(id);
+
+                case UIScreenOpenMode.Reset:
+                    return ResetScreen(id);
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(mode), mode, "지원하지 않는 Screen Open Mode입니다.");
+            }
+        }
 
         /// <summary>
         /// 지정한 UI가 완전히 열린 상태인지 확인합니다.
@@ -241,6 +293,126 @@ namespace CDG.UI
         internal void ClearInstanceCache()
         {
             instances.Clear();
+        }
+
+        private Result<UIScreen> PushScreen(UIId id)
+        {
+            Result<UIScreen> targetResult = PrepareScreenForOpen(id);
+
+            if (targetResult.IsFailure)
+            {
+                return Result<UIScreen>.Failure(targetResult.Error);
+            }
+
+            UIScreen previousScreen = currentScreen;
+
+            Result navigationResult = ChangeCurrentScreen(id);
+
+            if (navigationResult.IsFailure)
+            {
+                return Result<UIScreen>.Failure(navigationResult.Error);
+            }
+
+            if (previousScreen != null)
+            {
+                screenHistory.Push(previousScreen.Id);
+            }
+
+            return Result<UIScreen>.Success(currentScreen);
+        }
+
+        private Result<UIScreen> ReplaceScreen(UIId id)
+        {
+            Result<UIScreen> targetResult = PrepareScreenForOpen(id);
+
+            if (targetResult.IsFailure)
+            {
+                return Result<UIScreen>.Failure(targetResult.Error);
+            }
+
+            Result navigationResult = ChangeCurrentScreen(id);
+
+            if (navigationResult.IsFailure)
+            {
+                return Result<UIScreen>.Failure(navigationResult.Error);
+            }
+
+            return Result<UIScreen>.Success(currentScreen);
+        }
+
+        private Result<UIScreen> ResetScreen(UIId id)
+        {
+            Result<UIScreen> targetResult = PrepareScreenForOpen(id);
+
+            if (targetResult.IsFailure)
+            {
+                return Result<UIScreen>.Failure(targetResult.Error);
+            }
+
+            Result navigationResult = ChangeCurrentScreen(id);
+
+            if (navigationResult.IsFailure)
+            {
+                return Result<UIScreen>.Failure(navigationResult.Error);
+            }
+
+            screenHistory.Clear();
+
+            return Result<UIScreen>.Success(currentScreen);
+        }
+
+        private Result ChangeCurrentScreen(UIId id)
+        {
+            UIScreen previousScreen = currentScreen;
+
+            if (previousScreen != null)
+            {
+                Result closeResult = CloseView(previousScreen);
+
+                if (closeResult.IsFailure)
+                {
+                    return closeResult;
+                }
+            }
+
+            Result<UIScreen> openResult = OpenView<UIScreen>(id);
+
+            if (openResult.IsFailure)
+            {
+                return Result.Failure(openResult.Error);
+            }
+
+            currentScreen = openResult.Value;
+
+            return Result.Success();
+        }
+
+        private Result<UIScreen> PrepareScreenForOpen(UIId id)
+        {
+            Result<UIScreen> instanceResult = GetOrCreate<UIScreen>(id);
+
+            if (instanceResult.IsFailure)
+            {
+                return Result<UIScreen>.Failure(instanceResult.Error);
+            }
+
+            UIScreen screen = instanceResult.Value;
+
+            Result stateResult = ValidateOpenState(screen);
+
+            if (stateResult.IsFailure)
+            {
+                return Result<UIScreen>.Failure(stateResult.Error);
+            }
+
+            Result validationResult = ValidateLifecycleView(screen);
+
+            if (validationResult.IsFailure)
+            {
+                return Result<UIScreen>.Failure(validationResult.Error);
+            }
+
+            return Result<UIScreen>.Success(screen);
         }
 
         private Result ValidateOpenState(UIView view)
