@@ -29,6 +29,7 @@ namespace CDG.UI
 
         private readonly Dictionary<UIId, UIView> instances = new Dictionary<UIId, UIView>();
         private readonly Stack<UIId> screenHistory = new Stack<UIId>();
+        private readonly Stack<UIId> popupStack = new Stack<UIId>();
 
         private UIScreen currentScreen;
 
@@ -70,6 +71,42 @@ namespace CDG.UI
         public int ScreenHistoryCount => screenHistory.Count;
 
         /// <summary>
+        /// 현재 Popup Stack의 최상단 Popup을 반환합니다.
+        /// 유효한 Popup이 없으면 null을 반환하며, 파괴되거나 이미 닫힌 항목은 자동으로 Stack에서 정리합니다.
+        /// </summary>
+        public UIPopup TopPopup
+        {
+            get
+            {
+                CleanupPopupStack();
+
+                if (popupStack.Count == 0)
+                {
+                    return null;
+                }
+
+                UIId topId = popupStack.Peek();
+
+                return TryGetCachedInstance(topId, out UIView instance)
+                    ? instance as UIPopup
+                    : null;
+            }
+        }
+
+        /// <summary>
+        /// 현재 Popup Stack에 존재하는 유효한 Popup의 개수를 반환합니다.
+        /// 파괴되거나 이미 닫힌 항목은 계산 전에 자동으로 정리합니다.
+        /// </summary>
+        public int PopupCount
+        {
+            get
+            {
+                CleanupPopupStack();
+                return popupStack.Count;
+            }
+        }
+
+        /// <summary>
         /// 현재 Screen을 History에 보존하는 Push 방식으로 지정한 Screen을 엽니다.
         /// 현재 Screen이 없다면 History를 변경하지 않고 대상 Screen을 최초 Screen으로 엽니다.
         /// </summary>
@@ -104,6 +141,92 @@ namespace CDG.UI
                 default:
                     throw new ArgumentOutOfRangeException(nameof(mode), mode, "지원하지 않는 Screen Open Mode입니다.");
             }
+        }
+
+        /// <summary>
+        /// 지정한 Popup을 열고 Popup Stack의 최상단에 추가합니다.
+        /// 이미 열린 Popup이거나 Lifecycle 전환 중인 Popup은 다시 열 수 없습니다.
+        /// </summary>
+        /// <param name="id">열 Popup의 UI ID입니다.</param>
+        /// <returns>열린 Popup 또는 실패 정보를 포함하는 결과입니다.</returns>
+        public Result<UIPopup> OpenPopup(UIId id)
+        {
+            Result<UIPopup> targetResult = PreparePopupForOpen(id);
+
+            if (targetResult.IsFailure)
+            {
+                return Result<UIPopup>.Failure(targetResult.Error);
+            }
+
+            Result<UIPopup> openResult = OpenView<UIPopup>(id);
+
+            if (openResult.IsFailure)
+            {
+                return Result<UIPopup>.Failure(openResult.Error);
+            }
+
+            UIPopup popup = openResult.Value;
+
+            popup.transform.SetAsLastSibling();
+            popupStack.Push(popup.Id);
+
+            return Result<UIPopup>.Success(popup);
+        }
+
+        /// <summary>
+        /// 지정한 UI의 Runtime Instance를 닫습니다.
+        /// Popup을 닫으면 Popup Stack에서도 제거되며, 현재 Screen을 직접 닫는 경우 History를 자동 복원하지 않습니다.
+        /// </summary>
+        /// <param name="id">닫을 UI의 ID입니다.</param>
+        /// <returns>닫기 성공 또는 실패 정보를 포함하는 결과입니다.</returns>
+        public Result Close(UIId id)
+        {
+            if (id.IsEmpty)
+            {
+                return Result.Failure(new ResultError(
+                    UIErrorCodes.InvalidId,
+                    "UI ID는 비어 있을 수 없습니다."));
+            }
+
+            if (!TryGetCachedInstance(id, out UIView instance))
+            {
+                if (registry == null)
+                {
+                    return Result.Failure(new ResultError(
+                        UIErrorCodes.MissingRegistry,
+                        "UIController에 UIRegistry가 지정되지 않았습니다."));
+                }
+
+                Result<UIView> prefabResult = registry.Get(id);
+
+                if (prefabResult.IsFailure)
+                {
+                    return Result.Failure(prefabResult.Error);
+                }
+
+                return Result.Failure(new ResultError(
+                    UIErrorCodes.AlreadyClosed,
+                    $"UI '{id}'는 이미 닫힌 상태입니다."));
+            }
+
+            Result closeResult = CloseView(instance);
+
+            if (closeResult.IsFailure)
+            {
+                return closeResult;
+            }
+
+            if (instance is UIPopup)
+            {
+                RemovePopupFromStack(id);
+            }
+
+            if (instance is UIScreen screen && currentScreen == screen)
+            {
+                currentScreen = null;
+            }
+
+            return Result.Success();
         }
 
         /// <summary>
@@ -413,6 +536,98 @@ namespace CDG.UI
             }
 
             return Result<UIScreen>.Success(screen);
+        }
+
+        private Result<UIPopup> PreparePopupForOpen(UIId id)
+        {
+            Result<UIPopup> instanceResult = GetOrCreate<UIPopup>(id);
+
+            if (instanceResult.IsFailure)
+            {
+                return Result<UIPopup>.Failure(instanceResult.Error);
+            }
+
+            UIPopup popup = instanceResult.Value;
+
+            Result stateResult = ValidateOpenState(popup);
+
+            if (stateResult.IsFailure)
+            {
+                return Result<UIPopup>.Failure(stateResult.Error);
+            }
+
+            Result validationResult = ValidateLifecycleView(popup);
+
+            if (validationResult.IsFailure)
+            {
+                return Result<UIPopup>.Failure(validationResult.Error);
+            }
+
+            return Result<UIPopup>.Success(popup);
+        }
+
+        private void RemovePopupFromStack(UIId id)
+        {
+            if (popupStack.Count == 0)
+            {
+                return;
+            }
+
+            Stack<UIId> temporaryStack = new Stack<UIId>();
+
+            while (popupStack.Count > 0)
+            {
+                UIId currentId = popupStack.Pop();
+
+                if (currentId == id)
+                {
+                    break;
+                }
+
+                temporaryStack.Push(currentId);
+            }
+
+            while (temporaryStack.Count > 0)
+            {
+                popupStack.Push(temporaryStack.Pop());
+            }
+        }
+
+        private void CleanupPopupStack()
+        {
+            if (popupStack.Count == 0)
+            {
+                return;
+            }
+
+            Stack<UIId> temporaryStack = new Stack<UIId>();
+
+            while (popupStack.Count > 0)
+            {
+                UIId id = popupStack.Pop();
+
+                if (!TryGetCachedInstance(id, out UIView instance))
+                {
+                    continue;
+                }
+
+                if (instance is not UIPopup popup)
+                {
+                    continue;
+                }
+
+                if (popup.State == UIViewState.Closed)
+                {
+                    continue;
+                }
+
+                temporaryStack.Push(id);
+            }
+
+            while (temporaryStack.Count > 0)
+            {
+                popupStack.Push(temporaryStack.Pop());
+            }
         }
 
         private Result ValidateOpenState(UIView view)
