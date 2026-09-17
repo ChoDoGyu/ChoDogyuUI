@@ -11,7 +11,9 @@
       "version": "file:../../com.chodogyu.ui",
       "depth": 0,
       "source": "local",
-      "dependencies": {}
+      "dependencies": {
+        "com.unity.ugui": "2.0.0"
+      }
     },
     "com.unity.ai.navigation": {
       "version": "2.0.10",
