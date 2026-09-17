@@ -9,5 +9,9 @@
         internal const string RootAlreadyExists = "CDG.UI.Editor.RootAlreadyExists";
         internal const string InvalidAssetPath = "CDG.UI.Editor.InvalidAssetPath";
         internal const string AssetAlreadyExists = "CDG.UI.Editor.AssetAlreadyExists";
+        internal const string InvalidViewId = "CDG.UI.Editor.InvalidViewId";
+        internal const string PrefabCreationFailed = "CDG.UI.Editor.PrefabCreationFailed";
+        internal const string InvalidRegistry = "CDG.UI.Editor.InvalidRegistry";
+        internal const string InvalidViewPrefab = "CDG.UI.Editor.InvalidViewPrefab";
     }
 }
