@@ -6,7 +6,7 @@ namespace CDG.UI
 {
     /// <summary>
     /// Registry에 등록된 UI의 Runtime Instance와 화면 흐름을 관리하는 중심 Controller입니다.
-    /// 각 Runtime 관리 구성 요소를 조율하고 외부에 일관된 UI 제어 진입점을 제공합니다.
+    /// Runtime 관리 구성 요소와 Lifecycle Coordinator를 조율하고 외부에 일관된 UI 제어 진입점을 제공합니다.
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class UIController : MonoBehaviour
@@ -31,6 +31,7 @@ namespace CDG.UI
         private readonly UIPopupStack popupStack = new UIPopupStack();
         private readonly UIOverlayOrder overlayOrder = new UIOverlayOrder();
         private readonly UIInputCoordinator inputCoordinator = new UIInputCoordinator();
+        private readonly UIViewLifecycleCoordinator lifecycleCoordinator = new UIViewLifecycleCoordinator();
 
         /// <summary>
         /// Controller가 UI Prefab 조회에 사용하는 Registry를 반환합니다.
@@ -58,8 +59,8 @@ namespace CDG.UI
         public Transform TopOverlayLayer => topOverlayLayer;
 
         /// <summary>
-        /// 현재 열려 있는 Screen을 반환합니다.
-        /// 아직 Screen Navigation이 시작되지 않았거나 현재 Screen이 파괴된 경우 null일 수 있습니다.
+        /// 현재 Screen Navigation이 관리하는 Screen을 반환합니다.
+        /// Transition 중에는 Closing 또는 Opening 상태의 Screen이 반환될 수 있습니다.
         /// </summary>
         public UIScreen CurrentScreen => screenNavigator.CurrentScreen;
 
@@ -68,6 +69,12 @@ namespace CDG.UI
         /// History 컬렉션 자체는 외부에 노출하지 않습니다.
         /// </summary>
         public int ScreenHistoryCount => screenNavigator.HistoryCount;
+
+        /// <summary>
+        /// Screen Navigation 또는 하나 이상의 UI Transition이 현재 진행 중인지 여부를 반환합니다.
+        /// Transition이 없는 즉시 Lifecycle 처리는 Busy 상태로 남지 않습니다.
+        /// </summary>
+        public bool IsBusy => screenNavigator.IsBusy || lifecycleCoordinator.IsBusy;
 
         /// <summary>
         /// 현재 Popup Stack의 최상단 Popup을 반환합니다.
@@ -92,7 +99,7 @@ namespace CDG.UI
 
         /// <summary>
         /// 현재 Popup Stack에 존재하는 유효한 Popup의 개수를 반환합니다.
-        /// 파괴되거나 이미 닫힌 항목은 계산 전에 자동으로 정리합니다.
+        /// Closing 중인 Popup은 Transition 완료 전까지 Stack에 유지됩니다.
         /// </summary>
         public int PopupCount
         {
@@ -105,7 +112,7 @@ namespace CDG.UI
 
         /// <summary>
         /// 현재 UI 상태에서 Back 요청을 처리할 수 있는지 여부를 반환합니다.
-        /// Blocking Overlay가 Back 전달을 막거나 대상 UI가 전환 중인 경우 false를 반환합니다.
+        /// Blocking Overlay나 Lifecycle 또는 Screen Navigation 전환 중에는 처리 가능 여부가 제한됩니다.
         /// </summary>
         public bool CanBack
         {
@@ -143,6 +150,11 @@ namespace CDG.UI
                     return false;
                 }
 
+                if (screenNavigator.IsBusy)
+                {
+                    return false;
+                }
+
                 if (screenNavigator.HistoryCount == 0)
                 {
                     return false;
@@ -160,7 +172,7 @@ namespace CDG.UI
         /// Blocking Overlay는 Back 전달을 차단하고, Popup이 있으면 최상단 Popup을 닫으며,
         /// 그 외에는 Screen History의 이전 Screen을 복원합니다.
         /// </summary>
-        /// <returns>Back 처리 성공 또는 처리할 수 없는 원인을 포함하는 결과입니다.</returns>
+        /// <returns>Back 처리 시작 성공 또는 처리할 수 없는 원인을 포함하는 결과입니다.</returns>
         public Result Back()
         {
             popupStack.Cleanup(instanceStore);
@@ -204,6 +216,13 @@ namespace CDG.UI
                     "Normal Overlay가 현재 Screen History로의 Back 전달을 차단하고 있습니다."));
             }
 
+            if (screenNavigator.IsBusy)
+            {
+                return Result.Failure(new ResultError(
+                    UIErrorCodes.Busy,
+                    "Screen Navigation이 진행 중이므로 Back 요청을 처리할 수 없습니다."));
+            }
+
             if (screenNavigator.HistoryCount == 0)
             {
                 return Result.Failure(new ResultError(
@@ -226,7 +245,7 @@ namespace CDG.UI
         /// 현재 Screen이 없다면 History를 변경하지 않고 대상 Screen을 최초 Screen으로 엽니다.
         /// </summary>
         /// <param name="id">열 Screen의 UI ID입니다.</param>
-        /// <returns>열린 Screen 또는 Navigation 실패 정보를 포함하는 결과입니다.</returns>
+        /// <returns>Screen Navigation 시작 결과입니다.</returns>
         public Result<UIScreen> OpenScreen(UIId id)
         {
             return OpenScreen(id, UIScreenOpenMode.Push);
@@ -234,12 +253,11 @@ namespace CDG.UI
 
         /// <summary>
         /// 지정한 Navigation 방식으로 Screen을 엽니다.
-        /// Push는 현재 Screen을 History에 보존하고, Replace는 현재 History를 유지한 채 Screen만 교체하며,
-        /// Reset은 대상 Screen이 정상적으로 열린 후 기존 History를 모두 제거합니다.
+        /// Transition이 존재하는 경우 요청 성공은 Navigation이 정상적으로 시작되었음을 의미합니다.
         /// </summary>
         /// <param name="id">열 Screen의 UI ID입니다.</param>
         /// <param name="mode">적용할 Screen Navigation 방식입니다.</param>
-        /// <returns>열린 Screen 또는 Navigation 실패 정보를 포함하는 결과입니다.</returns>
+        /// <returns>대상 Screen 또는 Navigation 시작 실패 정보를 포함하는 결과입니다.</returns>
         public Result<UIScreen> OpenScreen(UIId id, UIScreenOpenMode mode)
         {
             Result<UIScreen> result = screenNavigator.Open(
@@ -257,20 +275,15 @@ namespace CDG.UI
 
         /// <summary>
         /// 지정한 Popup을 열고 Popup Stack의 최상단에 추가합니다.
-        /// 이미 열린 Popup이거나 Lifecycle 전환 중인 Popup은 다시 열 수 없습니다.
+        /// Transition이 존재하는 경우 Popup은 Opening 상태로 Stack에 먼저 등록됩니다.
         /// </summary>
         /// <param name="id">열 Popup의 UI ID입니다.</param>
-        /// <returns>열린 Popup 또는 실패 정보를 포함하는 결과입니다.</returns>
+        /// <returns>Popup 열기 시작 결과입니다.</returns>
         public Result<UIPopup> OpenPopup(UIId id)
         {
-            Result<UIPopup> targetResult = PrepareViewForOpen<UIPopup>(id);
-
-            if (targetResult.IsFailure)
-            {
-                return Result<UIPopup>.Failure(targetResult.Error);
-            }
-
-            Result<UIPopup> openResult = OpenView<UIPopup>(id);
+            Result<UIPopup> openResult = OpenView<UIPopup>(
+                id,
+                RefreshInputState);
 
             if (openResult.IsFailure)
             {
@@ -289,22 +302,17 @@ namespace CDG.UI
 
         /// <summary>
         /// 지정한 Overlay를 엽니다.
-        /// Overlay 설정에 따라 Normal 또는 Topmost Layer에 배치되며, 열린 순서를 내부적으로 기록합니다.
+        /// Overlay 설정에 따라 Normal 또는 Topmost Layer에 배치되며 Transition 중에도 열린 순서를 유지합니다.
         /// </summary>
         /// <param name="id">열 Overlay의 UI ID입니다.</param>
-        /// <returns>열린 Overlay 또는 실패 정보를 포함하는 결과입니다.</returns>
+        /// <returns>Overlay 열기 시작 결과입니다.</returns>
         public Result<UIOverlay> OpenOverlay(UIId id)
         {
             overlayOrder.Cleanup(instanceStore);
 
-            Result<UIOverlay> targetResult = PrepareViewForOpen<UIOverlay>(id);
-
-            if (targetResult.IsFailure)
-            {
-                return Result<UIOverlay>.Failure(targetResult.Error);
-            }
-
-            Result<UIOverlay> openResult = OpenView<UIOverlay>(id);
+            Result<UIOverlay> openResult = OpenView<UIOverlay>(
+                id,
+                RefreshInputState);
 
             if (openResult.IsFailure)
             {
@@ -323,11 +331,10 @@ namespace CDG.UI
 
         /// <summary>
         /// 지정한 UI의 Runtime Instance를 닫습니다.
-        /// Popup과 Overlay는 각각의 Runtime 관리 목록에서도 제거되며,
-        /// 현재 Screen을 직접 닫는 경우 History를 자동 복원하지 않습니다.
+        /// Transition이 존재하는 Popup과 Overlay는 Closing 완료 전까지 Runtime 관리 목록에 유지됩니다.
         /// </summary>
         /// <param name="id">닫을 UI의 ID입니다.</param>
-        /// <returns>닫기 성공 또는 실패 정보를 포함하는 결과입니다.</returns>
+        /// <returns>닫기 시작 성공 또는 실패 정보를 포함하는 결과입니다.</returns>
         public Result Close(UIId id)
         {
             overlayOrder.Cleanup(instanceStore);
@@ -360,26 +367,31 @@ namespace CDG.UI
                     $"UI '{id}'는 이미 닫힌 상태입니다."));
             }
 
-            Result closeResult = CloseView(instance);
+            Result closeResult = CloseView(
+                instance,
+                () =>
+                {
+                    if (instance is UIPopup)
+                    {
+                        popupStack.Remove(id);
+                    }
+
+                    if (instance is UIOverlay)
+                    {
+                        overlayOrder.Remove(id);
+                    }
+
+                    if (instance is UIScreen screen)
+                    {
+                        screenNavigator.HandleClosedScreen(screen);
+                    }
+
+                    RefreshInputState();
+                });
 
             if (closeResult.IsFailure)
             {
                 return closeResult;
-            }
-
-            if (instance is UIPopup)
-            {
-                popupStack.Remove(id);
-            }
-
-            if (instance is UIOverlay)
-            {
-                overlayOrder.Remove(id);
-            }
-
-            if (instance is UIScreen screen)
-            {
-                screenNavigator.HandleClosedScreen(screen);
             }
 
             RefreshInputState();
@@ -389,7 +401,7 @@ namespace CDG.UI
 
         /// <summary>
         /// 지정한 UI가 완전히 열린 상태인지 확인합니다.
-        /// 아직 생성되지 않았거나 ID가 유효하지 않은 경우 false를 반환합니다.
+        /// Opening 상태는 false로 처리합니다.
         /// </summary>
         /// <param name="id">확인할 UI ID입니다.</param>
         /// <returns>해당 UI의 Runtime Instance가 존재하고 Open 상태이면 true입니다.</returns>
@@ -509,14 +521,7 @@ namespace CDG.UI
 
             T view = instanceResult.Value;
 
-            Result stateResult = ValidateOpenState(view);
-
-            if (stateResult.IsFailure)
-            {
-                return Result<T>.Failure(stateResult.Error);
-            }
-
-            Result validationResult = ValidateLifecycleView(view);
+            Result validationResult = lifecycleCoordinator.ValidateOpen(view);
 
             if (validationResult.IsFailure)
             {
@@ -526,7 +531,7 @@ namespace CDG.UI
             return Result<T>.Success(view);
         }
 
-        internal Result<T> OpenView<T>(UIId id) where T : UIView
+        internal Result<T> OpenView<T>(UIId id, Action onCompleted = null) where T : UIView
         {
             Result<T> instanceResult = GetOrCreate<T>(id);
 
@@ -537,51 +542,33 @@ namespace CDG.UI
 
             T view = instanceResult.Value;
 
-            Result stateResult = ValidateOpenState(view);
+            Result openResult = lifecycleCoordinator.Open(
+                this,
+                view,
+                onCompleted);
 
-            if (stateResult.IsFailure)
+            if (openResult.IsFailure)
             {
-                return Result<T>.Failure(stateResult.Error);
+                return Result<T>.Failure(openResult.Error);
             }
-
-            Result validationResult = ValidateLifecycleView(view);
-
-            if (validationResult.IsFailure)
-            {
-                return Result<T>.Failure(validationResult.Error);
-            }
-
-            view.BeginOpening();
-            view.CompleteOpening();
 
             return Result<T>.Success(view);
         }
 
-        internal Result CloseView(UIView view)
+        internal Result OpenPreparedView(UIView view, Action onCompleted = null)
         {
-            if (view == null)
-            {
-                throw new ArgumentNullException(nameof(view));
-            }
+            return lifecycleCoordinator.Open(
+                this,
+                view,
+                onCompleted);
+        }
 
-            Result stateResult = ValidateCloseState(view);
-
-            if (stateResult.IsFailure)
-            {
-                return stateResult;
-            }
-
-            Result validationResult = ValidateLifecycleView(view);
-
-            if (validationResult.IsFailure)
-            {
-                return validationResult;
-            }
-
-            view.BeginClosing();
-            view.CompleteClosing();
-
-            return Result.Success();
+        internal Result CloseView(UIView view, Action onCompleted = null)
+        {
+            return lifecycleCoordinator.Close(
+                this,
+                view,
+                onCompleted);
         }
 
         internal bool TryGetCachedInstance(UIId id, out UIView instance)
@@ -604,63 +591,13 @@ namespace CDG.UI
             instanceStore.Clear();
         }
 
-        private void RefreshInputState()
+        internal void RefreshInputState()
         {
             inputCoordinator.Refresh(
                 instanceStore,
                 popupStack,
                 overlayOrder,
                 screenNavigator.CurrentScreen);
-        }
-
-        private Result ValidateOpenState(UIView view)
-        {
-            if (view.State == UIViewState.Open)
-            {
-                return Result.Failure(new ResultError(
-                    UIErrorCodes.AlreadyOpen,
-                    $"UI '{view.Id}'는 이미 열린 상태입니다."));
-            }
-
-            if (view.IsTransitioning)
-            {
-                return Result.Failure(new ResultError(
-                    UIErrorCodes.Busy,
-                    $"UI '{view.Id}'는 현재 {view.State} 상태이므로 Open 요청을 처리할 수 없습니다."));
-            }
-
-            return Result.Success();
-        }
-
-        private Result ValidateCloseState(UIView view)
-        {
-            if (view.State == UIViewState.Closed)
-            {
-                return Result.Failure(new ResultError(
-                    UIErrorCodes.AlreadyClosed,
-                    $"UI '{view.Id}'는 이미 닫힌 상태입니다."));
-            }
-
-            if (view.IsTransitioning)
-            {
-                return Result.Failure(new ResultError(
-                    UIErrorCodes.Busy,
-                    $"UI '{view.Id}'는 현재 {view.State} 상태이므로 Close 요청을 처리할 수 없습니다."));
-            }
-
-            return Result.Success();
-        }
-
-        private Result ValidateLifecycleView(UIView view)
-        {
-            if (view.CanvasGroup == null)
-            {
-                return Result.Failure(new ResultError(
-                    UIErrorCodes.MissingCanvasGroup,
-                    $"UI '{view.Id}'에 Lifecycle 및 입력 제어에 필요한 CanvasGroup이 없습니다."));
-            }
-
-            return Result.Success();
         }
 
         private Result<Transform> ResolveLayer(UIView prefab)

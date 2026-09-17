@@ -13,6 +13,7 @@ namespace CDG.UI
         private UIId id;
 
         private CanvasGroup canvasGroup;
+        private UIViewTransition transition;
         private UIViewState state = UIViewState.Closed;
 
         /// <summary>
@@ -46,6 +47,19 @@ namespace CDG.UI
                 }
 
                 return canvasGroup;
+            }
+        }
+
+        internal UIViewTransition Transition
+        {
+            get
+            {
+                if (transition == null)
+                {
+                    transition = GetComponent<UIViewTransition>();
+                }
+
+                return transition;
             }
         }
 

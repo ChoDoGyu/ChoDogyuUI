@@ -6,17 +6,20 @@ namespace CDG.UI
 {
     /// <summary>
     /// 현재 Screen과 Screen History를 관리하고 Push, Replace, Reset 및 Back 복원을 수행합니다.
-    /// UIController를 통해 실제 View Lifecycle을 실행하며 Screen Navigation 상태만 전담합니다.
+    /// Screen 전환 중에는 중복 Navigation을 차단하고 이전 Screen의 Closing 완료 후 다음 Screen을 엽니다.
     /// </summary>
     internal sealed class UIScreenNavigator
     {
         private readonly Stack<UIId> history = new Stack<UIId>();
 
         private UIScreen currentScreen;
+        private bool isNavigating;
 
         internal UIScreen CurrentScreen => currentScreen;
 
         internal int HistoryCount => history.Count;
+
+        internal bool IsBusy => isNavigating;
 
         internal Result<UIScreen> Open(UIController controller, UIId id, UIScreenOpenMode mode)
         {
@@ -25,16 +28,38 @@ namespace CDG.UI
                 throw new ArgumentNullException(nameof(controller));
             }
 
+            if (isNavigating)
+            {
+                return Result<UIScreen>.Failure(new ResultError(
+                    UIErrorCodes.Busy,
+                    "Screen Navigation이 진행 중이므로 새로운 Screen 요청을 처리할 수 없습니다."));
+            }
+
+            Result<UIScreen> targetResult = controller.PrepareViewForOpen<UIScreen>(id);
+
+            if (targetResult.IsFailure)
+            {
+                return Result<UIScreen>.Failure(targetResult.Error);
+            }
+
+            UIScreen targetScreen = targetResult.Value;
+
             switch (mode)
             {
                 case UIScreenOpenMode.Push:
-                    return Push(controller, id);
+                    return Push(
+                        controller,
+                        targetScreen);
 
                 case UIScreenOpenMode.Replace:
-                    return Replace(controller, id);
+                    return Replace(
+                        controller,
+                        targetScreen);
 
                 case UIScreenOpenMode.Reset:
-                    return Reset(controller, id);
+                    return Reset(
+                        controller,
+                        targetScreen);
 
                 default:
                     throw new ArgumentOutOfRangeException(nameof(mode), mode, "지원하지 않는 Screen Open Mode입니다.");
@@ -48,6 +73,13 @@ namespace CDG.UI
                 throw new ArgumentNullException(nameof(controller));
             }
 
+            if (isNavigating)
+            {
+                return Result.Failure(new ResultError(
+                    UIErrorCodes.Busy,
+                    "Screen Navigation이 진행 중이므로 Back 요청을 처리할 수 없습니다."));
+            }
+
             if (history.Count == 0)
             {
                 return Result.Failure(new ResultError(
@@ -57,16 +89,23 @@ namespace CDG.UI
 
             UIId previousScreenId = history.Peek();
 
-            Result<UIScreen> restoreResult = Replace(
-                controller,
+            Result<UIScreen> targetResult = controller.PrepareViewForOpen<UIScreen>(
                 previousScreenId);
 
-            if (restoreResult.IsFailure)
+            if (targetResult.IsFailure)
             {
-                return Result.Failure(restoreResult.Error);
+                return Result.Failure(targetResult.Error);
             }
 
-            history.Pop();
+            Result<UIScreen> navigationResult = BeginNavigation(
+                controller,
+                targetResult.Value,
+                () => history.Pop());
+
+            if (navigationResult.IsFailure)
+            {
+                return Result.Failure(navigationResult.Error);
+            }
 
             return Result.Success();
         }
@@ -84,102 +123,155 @@ namespace CDG.UI
             }
         }
 
-        private Result<UIScreen> Push(UIController controller, UIId id)
-        {
-            Result<UIScreen> targetResult = controller.PrepareViewForOpen<UIScreen>(id);
-
-            if (targetResult.IsFailure)
-            {
-                return Result<UIScreen>.Failure(targetResult.Error);
-            }
-
-            UIScreen previousScreen = currentScreen;
-
-            Result navigationResult = ChangeCurrentScreen(
-                controller,
-                id);
-
-            if (navigationResult.IsFailure)
-            {
-                return Result<UIScreen>.Failure(navigationResult.Error);
-            }
-
-            if (previousScreen != null)
-            {
-                history.Push(previousScreen.Id);
-            }
-
-            return Result<UIScreen>.Success(currentScreen);
-        }
-
-        private Result<UIScreen> Replace(UIController controller, UIId id)
-        {
-            Result<UIScreen> targetResult = controller.PrepareViewForOpen<UIScreen>(id);
-
-            if (targetResult.IsFailure)
-            {
-                return Result<UIScreen>.Failure(targetResult.Error);
-            }
-
-            Result navigationResult = ChangeCurrentScreen(
-                controller,
-                id);
-
-            if (navigationResult.IsFailure)
-            {
-                return Result<UIScreen>.Failure(navigationResult.Error);
-            }
-
-            return Result<UIScreen>.Success(currentScreen);
-        }
-
-        private Result<UIScreen> Reset(UIController controller, UIId id)
-        {
-            Result<UIScreen> targetResult = controller.PrepareViewForOpen<UIScreen>(id);
-
-            if (targetResult.IsFailure)
-            {
-                return Result<UIScreen>.Failure(targetResult.Error);
-            }
-
-            Result navigationResult = ChangeCurrentScreen(
-                controller,
-                id);
-
-            if (navigationResult.IsFailure)
-            {
-                return Result<UIScreen>.Failure(navigationResult.Error);
-            }
-
-            history.Clear();
-
-            return Result<UIScreen>.Success(currentScreen);
-        }
-
-        private Result ChangeCurrentScreen(UIController controller, UIId id)
+        private Result<UIScreen> Push(UIController controller, UIScreen targetScreen)
         {
             UIScreen previousScreen = currentScreen;
 
-            if (previousScreen != null)
-            {
-                Result closeResult = controller.CloseView(previousScreen);
-
-                if (closeResult.IsFailure)
+            return BeginNavigation(
+                controller,
+                targetScreen,
+                () =>
                 {
-                    return closeResult;
+                    if (previousScreen != null)
+                    {
+                        history.Push(previousScreen.Id);
+                    }
+                });
+        }
+
+        private Result<UIScreen> Replace(UIController controller, UIScreen targetScreen)
+        {
+            return BeginNavigation(
+                controller,
+                targetScreen,
+                null);
+        }
+
+        private Result<UIScreen> Reset(UIController controller, UIScreen targetScreen)
+        {
+            return BeginNavigation(
+                controller,
+                targetScreen,
+                history.Clear);
+        }
+
+        private Result<UIScreen> BeginNavigation(UIController controller, UIScreen targetScreen, Action onTargetStarted)
+        {
+            isNavigating = true;
+
+            UIScreen previousScreen = currentScreen;
+
+            if (previousScreen == null)
+            {
+                Result<UIScreen> startResult = StartTargetScreen(
+                    controller,
+                    targetScreen,
+                    onTargetStarted);
+
+                if (startResult.IsFailure)
+                {
+                    isNavigating = false;
                 }
+
+                return startResult;
             }
 
-            Result<UIScreen> openResult = controller.OpenView<UIScreen>(id);
+            bool synchronousCallbackInvoked = false;
+            bool delayedStartFailed = false;
+            ResultError delayedStartError = ResultError.None;
+
+            Result closeResult = controller.CloseView(
+                previousScreen,
+                () =>
+                {
+                    synchronousCallbackInvoked = true;
+
+                    if (currentScreen == previousScreen)
+                    {
+                        currentScreen = null;
+                    }
+
+                    Result<UIScreen> startResult = StartTargetScreen(
+                        controller,
+                        targetScreen,
+                        onTargetStarted);
+
+                    if (startResult.IsFailure)
+                    {
+                        delayedStartFailed = true;
+                        delayedStartError = startResult.Error;
+
+                        isNavigating = false;
+                        controller.RefreshInputState();
+                    }
+                });
+
+            if (closeResult.IsFailure)
+            {
+                isNavigating = false;
+
+                return Result<UIScreen>.Failure(closeResult.Error);
+            }
+
+            if (synchronousCallbackInvoked && delayedStartFailed)
+            {
+                return Result<UIScreen>.Failure(delayedStartError);
+            }
+
+            return Result<UIScreen>.Success(targetScreen);
+        }
+
+        private Result<UIScreen> StartTargetScreen(UIController controller, UIScreen targetScreen, Action onTargetStarted)
+        {
+            currentScreen = targetScreen;
+
+            bool startCallInProgress = true;
+            bool completedDuringStartCall = false;
+
+            Result openResult = controller.OpenPreparedView(
+                targetScreen,
+                () =>
+                {
+                    if (startCallInProgress)
+                    {
+                        completedDuringStartCall = true;
+                        return;
+                    }
+
+                    CompleteNavigation(controller);
+                });
+
+            startCallInProgress = false;
 
             if (openResult.IsFailure)
             {
-                return Result.Failure(openResult.Error);
+                if (currentScreen == targetScreen)
+                {
+                    currentScreen = null;
+                }
+
+                isNavigating = false;
+                controller.RefreshInputState();
+
+                return Result<UIScreen>.Failure(openResult.Error);
             }
 
-            currentScreen = openResult.Value;
+            onTargetStarted?.Invoke();
 
-            return Result.Success();
+            controller.RefreshInputState();
+
+            if (completedDuringStartCall)
+            {
+                CompleteNavigation(controller);
+            }
+
+            return Result<UIScreen>.Success(targetScreen);
+        }
+
+        private void CompleteNavigation(UIController controller)
+        {
+            isNavigating = false;
+            controller.RefreshInputState();
         }
     }
 }
