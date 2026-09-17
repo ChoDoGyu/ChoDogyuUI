@@ -35,6 +35,8 @@ namespace CDG.UI
                     "Screen Navigation이 진행 중이므로 새로운 Screen 요청을 처리할 수 없습니다."));
             }
 
+            EnsureSupportedMode(mode);
+
             Result<UIScreen> targetResult = controller.PrepareViewForOpen<UIScreen>(id);
 
             if (targetResult.IsFailure)
@@ -100,7 +102,8 @@ namespace CDG.UI
             Result<UIScreen> navigationResult = BeginNavigation(
                 controller,
                 targetResult.Value,
-                () => history.Pop());
+                () => history.Pop(),
+                null);
 
             if (navigationResult.IsFailure)
             {
@@ -136,7 +139,8 @@ namespace CDG.UI
                     {
                         history.Push(previousScreen.Id);
                     }
-                });
+                },
+                null);
         }
 
         private Result<UIScreen> Replace(UIController controller, UIScreen targetScreen)
@@ -144,6 +148,7 @@ namespace CDG.UI
             return BeginNavigation(
                 controller,
                 targetScreen,
+                null,
                 null);
         }
 
@@ -152,10 +157,11 @@ namespace CDG.UI
             return BeginNavigation(
                 controller,
                 targetScreen,
+                null,
                 history.Clear);
         }
 
-        private Result<UIScreen> BeginNavigation(UIController controller, UIScreen targetScreen, Action onTargetStarted)
+        private Result<UIScreen> BeginNavigation(UIController controller, UIScreen targetScreen, Action onTargetStarted, Action onTargetCompleted)
         {
             isNavigating = true;
 
@@ -166,7 +172,8 @@ namespace CDG.UI
                 Result<UIScreen> startResult = StartTargetScreen(
                     controller,
                     targetScreen,
-                    onTargetStarted);
+                    onTargetStarted,
+                    onTargetCompleted);
 
                 if (startResult.IsFailure)
                 {
@@ -194,7 +201,8 @@ namespace CDG.UI
                     Result<UIScreen> startResult = StartTargetScreen(
                         controller,
                         targetScreen,
-                        onTargetStarted);
+                        onTargetStarted,
+                        onTargetCompleted);
 
                     if (startResult.IsFailure)
                     {
@@ -221,7 +229,7 @@ namespace CDG.UI
             return Result<UIScreen>.Success(targetScreen);
         }
 
-        private Result<UIScreen> StartTargetScreen(UIController controller, UIScreen targetScreen, Action onTargetStarted)
+        private Result<UIScreen> StartTargetScreen(UIController controller, UIScreen targetScreen, Action onTargetStarted, Action onTargetCompleted)
         {
             currentScreen = targetScreen;
 
@@ -238,7 +246,10 @@ namespace CDG.UI
                         return;
                     }
 
-                    CompleteNavigation(controller);
+                    CompleteTargetNavigation(
+                        controller,
+                        targetScreen,
+                        onTargetCompleted);
                 });
 
             startCallInProgress = false;
@@ -262,16 +273,44 @@ namespace CDG.UI
 
             if (completedDuringStartCall)
             {
-                CompleteNavigation(controller);
+                CompleteTargetNavigation(
+                    controller,
+                    targetScreen,
+                    onTargetCompleted);
             }
 
             return Result<UIScreen>.Success(targetScreen);
+        }
+
+        private void CompleteTargetNavigation(UIController controller, UIScreen targetScreen, Action onTargetCompleted)
+        {
+            if (targetScreen != null &&
+                targetScreen.State == UIViewState.Open)
+            {
+                onTargetCompleted?.Invoke();
+            }
+
+            CompleteNavigation(controller);
         }
 
         private void CompleteNavigation(UIController controller)
         {
             isNavigating = false;
             controller.RefreshInputState();
+        }
+
+        private void EnsureSupportedMode(UIScreenOpenMode mode)
+        {
+            switch (mode)
+            {
+                case UIScreenOpenMode.Push:
+                case UIScreenOpenMode.Replace:
+                case UIScreenOpenMode.Reset:
+                    return;
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(mode), mode, "지원하지 않는 Screen Open Mode입니다.");
+            }
         }
     }
 }
