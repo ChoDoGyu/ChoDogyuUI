@@ -23,6 +23,11 @@ namespace CDG.UI.Editor
         private UIOverlayLayer overlayLayer = UIOverlayLayer.Normal;
         private bool overlayBlocksInput;
 
+        private UIValidationTargetType validationTargetType = UIValidationTargetType.Controller;
+        private UIController validationController;
+        private UIRegistry validationRegistry;
+        private UIValidationReport validationReport;
+
         private string statusMessage;
         private MessageType statusMessageType = MessageType.None;
 
@@ -64,6 +69,10 @@ namespace CDG.UI.Editor
             EditorGUILayout.Space(12f);
 
             DrawViewPrefabSection();
+
+            EditorGUILayout.Space(12f);
+
+            DrawValidationSection();
 
             if (!string.IsNullOrEmpty(statusMessage))
             {
@@ -150,6 +159,160 @@ namespace CDG.UI.Editor
             }
         }
 
+        private void DrawValidationSection()
+        {
+            EditorGUILayout.LabelField("Validation", EditorStyles.boldLabel);
+
+            EditorGUILayout.LabelField(
+                "UIController 전체 구성 또는 UIRegistry와 등록 View Prefab 구성을 검사합니다.",
+                EditorStyles.wordWrappedLabel);
+
+            EditorGUILayout.Space(6f);
+
+            UIValidationTargetType nextTargetType =
+                (UIValidationTargetType)EditorGUILayout.EnumPopup(
+                    "Target Type",
+                    validationTargetType);
+
+            if (nextTargetType != validationTargetType)
+            {
+                validationTargetType = nextTargetType;
+                validationReport = null;
+            }
+
+            DrawValidationTargetField();
+
+            EditorGUILayout.Space(6f);
+
+            if (GUILayout.Button("Run Validation"))
+            {
+                RunValidation();
+            }
+
+            if (validationReport != null)
+            {
+                EditorGUILayout.Space(8f);
+                DrawValidationReport();
+            }
+        }
+
+        private void DrawValidationTargetField()
+        {
+            switch (validationTargetType)
+            {
+                case UIValidationTargetType.Controller:
+                    {
+                        UIController nextController =
+                            (UIController)EditorGUILayout.ObjectField(
+                                "UI Controller",
+                                validationController,
+                                typeof(UIController),
+                                true);
+
+                        if (nextController != validationController)
+                        {
+                            validationController = nextController;
+                            validationReport = null;
+                        }
+
+                        break;
+                    }
+
+                case UIValidationTargetType.Registry:
+                    {
+                        UIRegistry nextRegistry =
+                            (UIRegistry)EditorGUILayout.ObjectField(
+                                "UI Registry",
+                                validationRegistry,
+                                typeof(UIRegistry),
+                                false);
+
+                        if (nextRegistry != validationRegistry)
+                        {
+                            validationRegistry = nextRegistry;
+                            validationReport = null;
+                        }
+
+                        break;
+                    }
+            }
+        }
+
+        private void DrawValidationReport()
+        {
+            if (validationReport.Count == 0)
+            {
+                EditorGUILayout.HelpBox(
+                    "Validation 문제를 발견하지 않았습니다.",
+                    MessageType.Info);
+
+                return;
+            }
+
+            int errorCount = CountIssues(UIValidationSeverity.Error);
+            int warningCount = CountIssues(UIValidationSeverity.Warning);
+
+            EditorGUILayout.LabelField(
+                $"Results — Errors: {errorCount}, Warnings: {warningCount}",
+                EditorStyles.boldLabel);
+
+            EditorGUILayout.Space(4f);
+
+            for (int i = 0; i < validationReport.Issues.Count; i++)
+            {
+                DrawValidationIssue(validationReport.Issues[i]);
+            }
+        }
+
+        private void DrawValidationIssue(UIValidationIssue issue)
+        {
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+
+            MessageType messageType = issue.Severity == UIValidationSeverity.Error
+                ? MessageType.Error
+                : MessageType.Warning;
+
+            EditorGUILayout.HelpBox(
+                $"{issue.Code}\n{issue.Message}",
+                messageType);
+
+            if (issue.Context != null)
+            {
+                EditorGUI.BeginDisabledGroup(true);
+
+                EditorGUILayout.ObjectField(
+                    "Context",
+                    issue.Context,
+                    typeof(UnityEngine.Object),
+                    true);
+
+                EditorGUI.EndDisabledGroup();
+            }
+
+            if (issue.Context != null || issue.CanFix)
+            {
+                EditorGUILayout.BeginHorizontal();
+
+                if (issue.Context != null &&
+                    GUILayout.Button("Select Context"))
+                {
+                    Selection.activeObject = issue.Context;
+                    EditorGUIUtility.PingObject(issue.Context);
+                }
+
+                if (issue.CanFix &&
+                    GUILayout.Button(issue.Fix.Label))
+                {
+                    ApplyValidationFix(issue);
+                    GUIUtility.ExitGUI();
+                }
+
+                EditorGUILayout.EndHorizontal();
+            }
+
+            EditorGUILayout.EndVertical();
+        }
+
         private void CreateRoot()
         {
             Result<UIController> result = UIRootCreator.Create();
@@ -231,6 +394,111 @@ namespace CDG.UI.Editor
                 : string.Empty;
 
             SetStatus($"View Prefab을 생성했습니다: {assetPath}.{registryMessage}", MessageType.Info);
+        }
+
+        private void RunValidation()
+        {
+            if (!TryCreateValidationReport(out UIValidationReport report))
+            {
+                return;
+            }
+
+            validationReport = report;
+
+            int errorCount = CountIssues(UIValidationSeverity.Error);
+            int warningCount = CountIssues(UIValidationSeverity.Warning);
+
+            SetStatus(
+                $"Validation 완료 — Error: {errorCount}, Warning: {warningCount}",
+                validationReport.HasErrors
+                    ? MessageType.Warning
+                    : MessageType.Info);
+        }
+
+        private bool TryCreateValidationReport(out UIValidationReport report)
+        {
+            report = null;
+
+            switch (validationTargetType)
+            {
+                case UIValidationTargetType.Controller:
+                    if (validationController == null)
+                    {
+                        SetStatus(
+                            "Validation할 UIController를 지정하세요.",
+                            MessageType.Warning);
+
+                        return false;
+                    }
+
+                    report = UIValidationRunner.Validate(validationController);
+                    return true;
+
+                case UIValidationTargetType.Registry:
+                    if (validationRegistry == null)
+                    {
+                        SetStatus(
+                            "Validation할 UIRegistry를 지정하세요.",
+                            MessageType.Warning);
+
+                        return false;
+                    }
+
+                    report = UIValidationRunner.Validate(validationRegistry);
+                    return true;
+
+                default:
+                    SetStatus(
+                        "지원하지 않는 Validation Target Type입니다.",
+                        MessageType.Warning);
+
+                    return false;
+            }
+        }
+
+        private void ApplyValidationFix(UIValidationIssue issue)
+        {
+            if (!issue.CanFix)
+            {
+                return;
+            }
+
+            Result result = issue.Fix.Apply();
+
+            if (result.IsFailure)
+            {
+                SetStatus(result.Error.Message, MessageType.Warning);
+                return;
+            }
+
+            if (TryCreateValidationReport(out UIValidationReport refreshedReport))
+            {
+                validationReport = refreshedReport;
+            }
+
+            SetStatus(
+                $"Safe Fix를 적용했습니다: {issue.Fix.Label}",
+                MessageType.Info);
+        }
+
+        private int CountIssues(UIValidationSeverity severity)
+        {
+            if (validationReport == null)
+            {
+                return 0;
+            }
+
+            int count = 0;
+
+            foreach (UIValidationIssue issue in validationReport.Issues)
+            {
+                if (issue.Severity == severity)
+                {
+                    count++;
+                }
+            }
+
+            return count;
         }
 
         private bool GetBlocksInput()
