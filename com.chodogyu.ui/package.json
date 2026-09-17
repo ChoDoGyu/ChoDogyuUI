@@ -2,7 +2,7 @@
   "name": "com.chodogyu.ui",
   "version": "0.1.0",
   "displayName": "ChoDogyu UI Framework & Editor Tool",
-  "description": "Unity ÇÁ·ÎÁ§Æ®¿¡¼­ Screen, Popup, OverlayÀÇ UI Èå¸§À» ÀÏ°üµÇ°Ô °ü¸®ÇÏ°í UI Á¦ÀÛ ¹× °ËÁõÀ» Áö¿øÇÏ´Â ¹ü¿ë UI Framework & Editor ToolÀÔ´Ï´Ù.",
+  "description": "Unity í”„ë¡œì íŠ¸ì—ì„œ Screen, Popup, Overlayì˜ UI íë¦„ì„ ì¼ê´€ë˜ê²Œ ê´€ë¦¬í•˜ê³  UI ì œì‘ ë° ê²€ì¦ì„ ì§€ì›í•˜ëŠ” ë²”ìš© UI Framework & Editor Toolì…ë‹ˆë‹¤.",
   "unity": "6000.3",
   "keywords": [
     "ui",
@@ -10,6 +10,13 @@
     "navigation",
     "popup",
     "editor"
+  ],
+  "samples": [
+    {
+      "displayName": "Basic Usage",
+      "description": "Screen Navigation, Popup, Overlay, Back ë° Fade Transitionì˜ ê¸°ë³¸ ì‚¬ìš© íë¦„ì„ ë³´ì—¬ì£¼ëŠ” Sampleì…ë‹ˆë‹¤.",
+      "path": "Samples~/BasicUsage"
+    }
   ],
   "author": {
     "name": "ChoDogyu"

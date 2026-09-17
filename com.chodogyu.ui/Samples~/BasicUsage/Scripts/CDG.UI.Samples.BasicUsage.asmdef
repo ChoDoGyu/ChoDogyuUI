@@ -1,0 +1,17 @@
+{
+  "name": "CDG.UI.Samples.BasicUsage",
+  "rootNamespace": "CDG.UI.Samples.BasicUsage",
+  "references": [
+    "CDG.UI",
+    "CDG.Core"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

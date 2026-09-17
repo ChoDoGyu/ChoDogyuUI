@@ -1,0 +1,19 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 711b8d818ac4dc4418350d038b8102f8, type: 3}
+  m_Name: SampleUIRegistry
+  m_EditorClassIdentifier: CDG.UI::CDG.UI.UIRegistry
+  prefabs:
+  - {fileID: 3682740595731031798, guid: 33a710d434597a445aa69bc095ff3e16, type: 3}
+  - {fileID: 2681097303277560211, guid: 40d3d35399087ed4e855f6e94d5dc215, type: 3}
+  - {fileID: 3601947904942926131, guid: daa3d69634b803a45adae8b74b89496f, type: 3}
+  - {fileID: 1339285718755051700, guid: a1bb54ac35d3bcf4ba24b50d8d8853a2, type: 3}
