@@ -111,7 +111,7 @@ namespace CDG.UI.Editor
 
             if (GUILayout.Button("Create UI Registry"))
             {
-                CreateRegistry();
+                EditorApplication.delayCall += CreateRegistry;
             }
         }
 
@@ -140,7 +140,7 @@ namespace CDG.UI.Editor
 
             if (GUILayout.Button("Create View Prefab"))
             {
-                CreateViewPrefab();
+                EditorApplication.delayCall += CreateViewPrefab;
             }
         }
 
