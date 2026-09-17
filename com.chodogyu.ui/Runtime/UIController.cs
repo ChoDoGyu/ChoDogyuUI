@@ -258,6 +258,8 @@ namespace CDG.UI
         /// <returns>대상 Screen 또는 Navigation 시작 실패 정보를 포함하는 결과입니다.</returns>
         public Result<UIScreen> OpenScreen(UIId id, UIScreenOpenMode mode)
         {
+            CleanupRuntimeCollectionsAndRefreshInput();
+
             Result<UIScreen> result = screenNavigator.Open(
                 this,
                 id,
@@ -279,6 +281,8 @@ namespace CDG.UI
         /// <returns>Popup 열기 시작 결과입니다.</returns>
         public Result<UIPopup> OpenPopup(UIId id)
         {
+            CleanupRuntimeCollectionsAndRefreshInput();
+
             Result<UIPopup> openResult = OpenView<UIPopup>(
                 id,
                 RefreshInputState);
@@ -306,7 +310,7 @@ namespace CDG.UI
         /// <returns>Overlay 열기 시작 결과입니다.</returns>
         public Result<UIOverlay> OpenOverlay(UIId id)
         {
-            overlayOrder.Cleanup(instanceStore);
+            CleanupRuntimeCollectionsAndRefreshInput();
 
             Result<UIOverlay> openResult = OpenView<UIOverlay>(
                 id,
@@ -335,7 +339,7 @@ namespace CDG.UI
         /// <returns>닫기 시작 성공 또는 실패 정보를 포함하는 결과입니다.</returns>
         public Result Close(UIId id)
         {
-            overlayOrder.Cleanup(instanceStore);
+            CleanupRuntimeCollectionsAndRefreshInput();
 
             if (id.IsEmpty)
             {
