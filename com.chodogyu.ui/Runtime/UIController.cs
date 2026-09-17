@@ -84,7 +84,7 @@ namespace CDG.UI
         {
             get
             {
-                popupStack.Cleanup(instanceStore);
+                CleanupRuntimeCollectionsAndRefreshInput();
 
                 if (!popupStack.TryPeek(out UIId topId))
                 {
@@ -105,7 +105,7 @@ namespace CDG.UI
         {
             get
             {
-                popupStack.Cleanup(instanceStore);
+                CleanupRuntimeCollectionsAndRefreshInput();
                 return popupStack.Count;
             }
         }
@@ -118,8 +118,7 @@ namespace CDG.UI
         {
             get
             {
-                popupStack.Cleanup(instanceStore);
-                overlayOrder.Cleanup(instanceStore);
+                CleanupRuntimeCollectionsAndRefreshInput();
 
                 if (overlayOrder.HasBlockingOverlay(
                     UIOverlayLayer.Topmost,
@@ -175,8 +174,7 @@ namespace CDG.UI
         /// <returns>Back 처리 시작 성공 또는 처리할 수 없는 원인을 포함하는 결과입니다.</returns>
         public Result Back()
         {
-            popupStack.Cleanup(instanceStore);
-            overlayOrder.Cleanup(instanceStore);
+            CleanupRuntimeCollectionsAndRefreshInput();
 
             if (overlayOrder.HasBlockingOverlay(
                 UIOverlayLayer.Topmost,
@@ -492,7 +490,7 @@ namespace CDG.UI
         {
             get
             {
-                overlayOrder.Cleanup(instanceStore);
+                CleanupRuntimeCollectionsAndRefreshInput();
                 return overlayOrder.Count;
             }
         }
@@ -598,6 +596,24 @@ namespace CDG.UI
                 popupStack,
                 overlayOrder,
                 screenNavigator.CurrentScreen);
+        }
+
+        private void CleanupRuntimeCollectionsAndRefreshInput()
+        {
+            int popupCountBeforeCleanup = popupStack.Count;
+            int overlayCountBeforeCleanup = overlayOrder.Count;
+
+            popupStack.Cleanup(instanceStore);
+            overlayOrder.Cleanup(instanceStore);
+
+            bool collectionChanged =
+                popupCountBeforeCleanup != popupStack.Count ||
+                overlayCountBeforeCleanup != overlayOrder.Count;
+
+            if (collectionChanged)
+            {
+                RefreshInputState();
+            }
         }
 
         private Result<Transform> ResolveLayer(UIView prefab)
